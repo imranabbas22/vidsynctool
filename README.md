@@ -1,4 +1,4 @@
-# 🚀 "The Daily Audit" Shorts Production Pipeline
+# vidsynctool
 
 An autonomous, production-grade Python system that generates, renders, and headlessly publishes vertical YouTube Shorts debunks for **The Daily Audit** network. Operating under a strict, no-nonsense "academic teacher" persona, the channel debunks common science and history misconceptions.
 
@@ -74,7 +74,7 @@ cd app_build
 ```
 *(On first execution, follow the browser OAuth page to authorize your channel. Future runs are 100% headless).*
 
-For comprehensive configurations and Windows Task Scheduler automation setups, consult [DEPLOYMENT.md](file:///c:/Users/imran/auto-youtube-project/docs/DEPLOYMENT.md).
+For comprehensive configurations and Windows Task Scheduler automation setups, consult [DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ---
 
@@ -88,7 +88,7 @@ Our pipeline includes a comprehensive pytest suite covering SQLite integrity che
 
 ## 🏛️ Sign-Off
 Produced under strict compliance with the **Autonomous Full-Stack Development Team** standards.
-- [Technical_Specification.md](file:///c:/Users/imran/auto-youtube-project/production_artifacts/Technical_Specification.md) - *Approved*
-- [Architecture.md](file:///c:/Users/imran/auto-youtube-project/production_artifacts/Architecture.md) - *Approved*
-- [Test_Coverage_Report.md](file:///c:/Users/imran/auto-youtube-project/production_artifacts/Test_Coverage_Report.md) - *Verified*
-- [QA_Report.md](file:///c:/Users/imran/auto-youtube-project/production_artifacts/QA_Report.md) - *Audited*
+- [Technical_Specification.md](production_artifacts/Technical_Specification.md) - *Approved*
+- [Architecture.md](production_artifacts/Architecture.md) - *Approved*
+- [Test_Coverage_Report.md](production_artifacts/Test_Coverage_Report.md) - *Verified*
+- [QA_Report.md](production_artifacts/QA_Report.md) - *Audited*
