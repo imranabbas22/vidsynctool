@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ContentFlow — AI Video Publishing Tool</title>
+    <title>The Daily Audit — Automated Video Publishing Pipeline</title>
     <link
         href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap"
         rel="stylesheet" />
@@ -453,7 +453,7 @@
 
     <!-- NAV -->
     <nav>
-        <a class="nav-logo" href="index.html">Content<span>Flow</span></a>
+        <a class="nav-logo" href="index.html">The Daily<span>Audit</span></a>
         <ul class="nav-links">
             <li><a href="#features">Features</a></li>
             <li><a href="#how">How It Works</a></li>
@@ -467,21 +467,22 @@
         <div class="hero-bg-circle"></div>
         <div class="hero-bg-circle"></div>
 
-        <p class="hero-eyebrow">AI-Powered Video Publishing</p>
+        <p class="hero-eyebrow">Automated Multi-Platform Publishing Pipeline</p>
         <h1 class="hero-title">
-            Publish your<br />
-            content to <em>TikTok</em><br />
-            without the hassle.
+            AI-powered news shorts<br />
+            published to <em>TikTok</em>, YouTube<br />
+            & Facebook — daily.
         </h1>
         <p class="hero-subtitle">
-            ContentFlow is a streamlined publishing tool for independent creators who produce AI-assisted short-form
-            video content. Upload once — post with ease.
+            The Daily Audit is an automated pipeline that generates AI-assisted news and educational short-form
+            videos and publishes them to your social media accounts using official APIs. No manual uploads needed.
         </p>
 
         <div class="hero-badges">
+            <span class="badge"><span class="badge-dot"></span> YouTube Data API</span>
             <span class="badge"><span class="badge-dot"></span> TikTok Content Posting API</span>
-            <span class="badge"><span class="badge-dot"></span> Original Creator Content</span>
-            <span class="badge"><span class="badge-dot"></span> No Third-Party Access</span>
+            <span class="badge"><span class="badge-dot"></span> Facebook Reels API</span>
+            <span class="badge"><span class="badge-dot"></span> AI Script & Voiceover</span>
         </div>
     </section>
 
@@ -489,47 +490,47 @@
 
     <!-- FEATURES -->
     <section id="features">
-        <p class="section-label">What We Do</p>
-        <h2 class="section-title">Built for creators<br />who move fast.</h2>
-        <p class="section-body">ContentFlow helps solo creators automate their TikTok video publishing workflow using
-            TikTok's official Content Posting API — so you can focus on making content, not clicking buttons.</p>
+        <p class="section-label">What It Does</p>
+        <h2 class="section-title">Fully automated<br />publishing pipeline.</h2>
+        <p class="section-body">The Daily Audit is an automated, headless pipeline that generates news-style short-form
+            videos using AI and publishes them to multiple platforms via official APIs — no manual steps required.</p>
 
         <div class="features-grid">
             <div class="feature-card">
-                <div class="feature-icon">🎬</div>
-                <h3>Direct Video Publishing</h3>
-                <p>Publish pre-produced video files directly to your own TikTok account via TikTok's official API — no
-                    browser automation, no workarounds.</p>
+                <div class="feature-icon">📰</div>
+                <h3>AI News Script Generation</h3>
+                <p>Uses Google Gemini to generate concise news scripts from curated topics — science, history, biology,
+                    physics, and more. Each script is fact-based and ready for voiceover.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon">📅</div>
-                <h3>Batch Upload Support</h3>
-                <p>Queue multiple videos for publishing in one go. Set captions, hashtags, and privacy levels per video
-                    — all from one place.</p>
+                <div class="feature-icon">🎙️</div>
+                <h3>AI Voiceover & Audio</h3>
+                <p>Azure Cognitive Services speech synthesis generates natural-sounding voiceover audio. Background music
+                    and SFX transitions are layered automatically per category.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎬</div>
+                <h3>Automated Video Assembly</h3>
+                <p>MoviePy composites the voiceover, background visuals, captions, and music into a finished short-form
+                    video — no video editing software needed.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📤</div>
+                <h3>Multi-Platform Publishing</h3>
+                <p>Uploads the finished video to TikTok (Content Posting API), YouTube (Data API), and Facebook
+                    (Reels API) using official OAuth 2.0 authentication for each platform.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">🔐</div>
-                <h3>Secure OAuth Login</h3>
-                <p>Uses TikTok's official OAuth 2.0 login flow. ContentFlow only accesses your own account — never
-                    third-party accounts.</p>
+                <h3>Secure OAuth Authentication</h3>
+                <p>Uses official OAuth 2.0 flows for all platforms. Tokens are cached locally and refreshed
+                    automatically. The pipeline only accesses your own authorized accounts.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon">📊</div>
-                <h3>Publish Status Tracking</h3>
-                <p>Real-time status polling after each upload so you always know if a video published successfully or
-                    needs attention.</p>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon">🤖</div>
-                <h3>AI Content Friendly</h3>
-                <p>Designed specifically for creators producing AI-generated or AI-assisted videos — quizzes, facts,
-                    myth busters, and more.</p>
-            </div>
-            <div class="feature-card">
-                <div class="feature-icon">⚡</div>
-                <h3>Lightweight & Fast</h3>
-                <p>No bloat. ContentFlow is a focused publishing tool — not a full social media suite. Does one thing,
-                    and does it well.</p>
+                <div class="feature-icon">⏰</div>
+                <h3>Fully Headless Automation</h3>
+                <p>Once configured, the pipeline runs autonomously via Windows Task Scheduler. Videos are generated and
+                    published daily with zero user interaction.</p>
             </div>
         </div>
     </section>
@@ -539,31 +540,47 @@
     <!-- HOW IT WORKS -->
     <section id="how">
         <p class="section-label">How It Works</p>
-        <h2 class="section-title">Simple three-step<br />publishing flow.</h2>
+        <h2 class="section-title">From topic to TikTok<br />in five automated steps.</h2>
 
         <div class="steps">
             <div class="step">
                 <div class="step-num">1</div>
                 <div class="step-content">
-                    <h3>Connect Your TikTok Account</h3>
-                    <p>Log in securely via TikTok's official OAuth 2.0 flow. ContentFlow only requests the minimum
-                        permissions needed to publish to your own account.</p>
+                    <h3>Topic Selection & Script Generation</h3>
+                    <p>The pipeline selects a topic from predefined categories (science, history, biology, physics, etc.)
+                        and generates a concise, fact-based news script using Google Gemini AI.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">2</div>
                 <div class="step-content">
-                    <h3>Queue Your Videos</h3>
-                    <p>Select your pre-produced video files, add captions and hashtags, and configure privacy settings
-                        per post. Supports bulk queuing for efficiency.</p>
+                    <h3>Voiceover & Audio Production</h3>
+                    <p>Azure Cognitive Services converts the script into natural speech audio. Category-appropriate
+                        background music and transition SFX are mixed in automatically.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">3</div>
                 <div class="step-content">
-                    <h3>Publish & Track</h3>
-                    <p>ContentFlow initiates the upload via TikTok's Content Posting API and polls for completion status
-                        — so you know exactly when each video goes live.</p>
+                    <h3>Video Assembly & Captioning</h3>
+                    <p>MoviePy composites the audio, visuals, and on-screen text captions into a finished short-form
+                        video. The output is an MP4 ready for publishing.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">4</div>
+                <div class="step-content">
+                    <h3>Multi-Platform Publishing</h3>
+                    <p>The finished video is uploaded to TikTok (Content Posting API), YouTube (Data API), and Facebook
+                        (Reels API) using official OAuth 2.0 authentication for each platform.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">5</div>
+                <div class="step-content">
+                    <h3>Verification & Logging</h3>
+                    <p>The pipeline polls each platform's API for publish status and logs the results. On failure, it
+                        retries and alerts so no publish is silently lost.</p>
                 </div>
             </div>
         </div>
@@ -574,36 +591,36 @@
     <!-- USE CASES -->
     <section id="usecases">
         <p class="section-label">Use Cases</p>
-        <h2 class="section-title">Made for your type<br />of content.</h2>
-        <p class="section-body">ContentFlow is designed for creators of AI-assisted, fact-based, and entertainment
-            short-form content — including but not limited to:</p>
+        <h2 class="section-title">Daily news shorts<br />on any topic.</h2>
+        <p class="section-body">The Daily Audit is designed for automated, AI-assisted short-form video content across
+            educational and news categories — including but not limited to:</p>
 
         <div class="use-cases">
-            <span class="use-case-pill">🤯 Bizarre & Surprising Truths</span>
-            <span class="use-case-pill">✅ Myth vs. Truth Videos</span>
-            <span class="use-case-pill">🧠 IQ & Knowledge Quizzes</span>
-            <span class="use-case-pill">❓ Q&A Format Content</span>
+            <span class="use-case-pill">📰 Daily News Summaries</span>
+            <span class="use-case-pill">🧪 Science & Discovery</span>
+            <span class="use-case-pill">📖 History & Events</span>
+            <span class="use-case-pill">🧬 Biology & Nature</span>
+            <span class="use-case-pill">⚛️ Physics & Space</span>
             <span class="use-case-pill">📚 Educational Shorts</span>
-            <span class="use-case-pill">🎯 Trivia Challenges</span>
         </div>
 
         <div class="compliance-box">
-            <h3>🛡️ TikTok Policy Compliant</h3>
-            <p>ContentFlow uses only TikTok's official Content Posting API and operates within TikTok's Developer Terms
-                of Service. All content published through ContentFlow is original, creator-owned content. ContentFlow
-                does not access or manage third-party TikTok accounts, does not scrape data, and does not automate
-                engagement (likes, comments, follows).</p>
+            <h3>🛡️ Platform Policy Compliant</h3>
+            <p>The Daily Audit uses only official APIs (TikTok Content Posting API, YouTube Data API, Facebook Graph
+                API) and operates within each platform's Developer Terms of Service. All content published is original,
+                creator-owned, AI-assisted material. The pipeline does not access third-party accounts, scrape data,
+                or automate engagement (likes, comments, follows).</p>
         </div>
     </section>
 
     <!-- FOOTER -->
     <footer>
-        <a class="footer-logo" href="index.html">Content<span>Flow</span></a>
+        <a class="footer-logo" href="index.html">The Daily<span>Audit</span></a>
         <div class="footer-links">
             <a href="privacy.html">Privacy Policy</a>
             <a href="terms.html">Terms of Service</a>
         </div>
-        <p class="footer-copy">© 2026 ContentFlow. All rights reserved. Independent creator publishing tool.</p>
+        <p class="footer-copy">© 2026 The Daily Audit. All rights reserved. Independent automated publishing pipeline.</p>
     </footer>
 
 </body>
