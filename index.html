@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ContentFlow — AI Video Publishing Tool</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap"
+        rel="stylesheet" />
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --black: #0a0a0a;
+            --white: #f5f2ec;
+            --cream: #ede9df;
+            --accent: #ff3c3c;
+            --accent2: #ffb347;
+            --mid: #1e1e1e;
+            --text-muted: #888;
+            --border: rgba(245, 242, 236, 0.1);
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background: var(--black);
+            color: var(--white);
+            font-family: 'DM Sans', sans-serif;
+            font-weight: 300;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* ── NOISE OVERLAY ── */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 999;
+            opacity: 0.4;
+        }
+
+        /* ── NAV ── */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1.25rem 2.5rem;
+            background: rgba(10, 10, 10, 0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .nav-logo {
+            font-family: 'Syne', sans-serif;
+            font-weight: 800;
+            font-size: 1.15rem;
+            letter-spacing: -0.02em;
+            color: var(--white);
+            text-decoration: none;
+        }
+
+        .nav-logo span {
+            color: var(--accent);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.875rem;
+            letter-spacing: 0.03em;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--white);
+        }
+
+        /* ── HERO ── */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 8rem 2.5rem 4rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero-bg-circle {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            pointer-events: none;
+        }
+
+        .hero-bg-circle:nth-child(1) {
+            width: 500px;
+            height: 500px;
+            background: rgba(255, 60, 60, 0.12);
+            top: -100px;
+            right: -100px;
+            animation: drift 10s ease-in-out infinite alternate;
+        }
+
+        .hero-bg-circle:nth-child(2) {
+            width: 350px;
+            height: 350px;
+            background: rgba(255, 179, 71, 0.08);
+            bottom: 50px;
+            left: -80px;
+            animation: drift 14s ease-in-out infinite alternate-reverse;
+        }
+
+        @keyframes drift {
+            from {
+                transform: translate(0, 0) scale(1);
+            }
+
+            to {
+                transform: translate(30px, 20px) scale(1.08);
+            }
+        }
+
+        .hero-eyebrow {
+            font-size: 0.75rem;
+            font-weight: 500;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin-bottom: 1.25rem;
+            opacity: 0;
+            animation: fadeUp 0.7s 0.1s forwards;
+        }
+
+        .hero-title {
+            font-family: 'Syne', sans-serif;
+            font-weight: 800;
+            font-size: clamp(2.8rem, 6vw, 5.5rem);
+            line-height: 1.0;
+            letter-spacing: -0.03em;
+            max-width: 820px;
+            opacity: 0;
+            animation: fadeUp 0.7s 0.25s forwards;
+        }
+
+        .hero-title em {
+            font-style: normal;
+            color: var(--accent);
+        }
+
+        .hero-subtitle {
+            margin-top: 1.5rem;
+            font-size: 1.1rem;
+            color: #aaa;
+            max-width: 520px;
+            line-height: 1.7;
+            opacity: 0;
+            animation: fadeUp 0.7s 0.4s forwards;
+        }
+
+        .hero-badges {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-top: 2.5rem;
+            opacity: 0;
+            animation: fadeUp 0.7s 0.55s forwards;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.45rem 1rem;
+            border: 1px solid var(--border);
+            border-radius: 100px;
+            font-size: 0.8rem;
+            color: #ccc;
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .badge-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent2);
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* ── DIVIDER ── */
+        .divider {
+            height: 1px;
+            background: linear-gradient(to right, transparent, var(--border), transparent);
+            margin: 0 2.5rem;
+        }
+
+        /* ── SECTION ── */
+        section {
+            padding: 5rem 2.5rem;
+            max-width: 1080px;
+            margin: 0 auto;
+        }
+
+        .section-label {
+            font-size: 0.7rem;
+            font-weight: 500;
+            letter-spacing: 0.25em;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin-bottom: 1rem;
+        }
+
+        .section-title {
+            font-family: 'Syne', sans-serif;
+            font-weight: 700;
+            font-size: clamp(1.8rem, 3vw, 2.8rem);
+            letter-spacing: -0.02em;
+            line-height: 1.1;
+            margin-bottom: 1.25rem;
+        }
+
+        .section-body {
+            color: #aaa;
+            max-width: 600px;
+            line-height: 1.8;
+        }
+
+        /* ── FEATURES ── */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+            gap: 1.25rem;
+            margin-top: 3rem;
+        }
+
+        .feature-card {
+            background: var(--mid);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            transition: transform 0.25s, border-color 0.25s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(255, 60, 60, 0.3);
+        }
+
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            font-family: 'Syne', sans-serif;
+            font-weight: 700;
+            font-size: 1.05rem;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.01em;
+        }
+
+        .feature-card p {
+            font-size: 0.875rem;
+            color: #888;
+            line-height: 1.7;
+        }
+
+        /* ── HOW IT WORKS ── */
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            margin-top: 3rem;
+            position: relative;
+        }
+
+        .step {
+            display: flex;
+            gap: 2rem;
+            align-items: flex-start;
+            padding-bottom: 2.5rem;
+            position: relative;
+        }
+
+        .step:not(:last-child)::before {
+            content: '';
+            position: absolute;
+            left: 19px;
+            top: 44px;
+            width: 2px;
+            bottom: 0;
+            background: linear-gradient(to bottom, var(--accent), transparent);
+            opacity: 0.3;
+        }
+
+        .step-num {
+            flex-shrink: 0;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: white;
+            font-family: 'Syne', sans-serif;
+            font-weight: 800;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .step-content h3 {
+            font-family: 'Syne', sans-serif;
+            font-weight: 700;
+            font-size: 1.05rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .step-content p {
+            color: #888;
+            font-size: 0.875rem;
+            line-height: 1.7;
+        }
+
+        /* ── USE CASES ── */
+        .use-cases {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-top: 2rem;
+        }
+
+        .use-case-pill {
+            padding: 0.6rem 1.25rem;
+            background: var(--mid);
+            border: 1px solid var(--border);
+            border-radius: 100px;
+            font-size: 0.875rem;
+            color: var(--white);
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .use-case-pill:hover {
+            background: rgba(255, 60, 60, 0.12);
+            border-color: rgba(255, 60, 60, 0.4);
+        }
+
+        /* ── COMPLIANCE NOTE ── */
+        .compliance-box {
+            background: var(--mid);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--accent2);
+            border-radius: 12px;
+            padding: 1.75rem 2rem;
+            margin-top: 3rem;
+        }
+
+        .compliance-box h3 {
+            font-family: 'Syne', sans-serif;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .compliance-box p {
+            color: #999;
+            font-size: 0.9rem;
+            line-height: 1.7;
+        }
+
+        /* ── FOOTER ── */
+        footer {
+            border-top: 1px solid var(--border);
+            padding: 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .footer-logo {
+            font-family: 'Syne', sans-serif;
+            font-weight: 800;
+            font-size: 1rem;
+            color: var(--white);
+            text-decoration: none;
+        }
+
+        .footer-logo span {
+            color: var(--accent);
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .footer-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            font-size: 0.8rem;
+            transition: color 0.2s;
+        }
+
+        .footer-links a:hover {
+            color: var(--white);
+        }
+
+        .footer-copy {
+            color: #555;
+            font-size: 0.75rem;
+            width: 100%;
+            margin-top: 0.5rem;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- NAV -->
+    <nav>
+        <a class="nav-logo" href="index.html">Content<span>Flow</span></a>
+        <ul class="nav-links">
+            <li><a href="#features">Features</a></li>
+            <li><a href="#how">How It Works</a></li>
+            <li><a href="privacy.html">Privacy</a></li>
+            <li><a href="terms.html">Terms</a></li>
+        </ul>
+    </nav>
+
+    <!-- HERO -->
+    <section class="hero">
+        <div class="hero-bg-circle"></div>
+        <div class="hero-bg-circle"></div>
+
+        <p class="hero-eyebrow">AI-Powered Video Publishing</p>
+        <h1 class="hero-title">
+            Publish your<br />
+            content to <em>TikTok</em><br />
+            without the hassle.
+        </h1>
+        <p class="hero-subtitle">
+            ContentFlow is a streamlined publishing tool for independent creators who produce AI-assisted short-form
+            video content. Upload once — post with ease.
+        </p>
+
+        <div class="hero-badges">
+            <span class="badge"><span class="badge-dot"></span> TikTok Content Posting API</span>
+            <span class="badge"><span class="badge-dot"></span> Original Creator Content</span>
+            <span class="badge"><span class="badge-dot"></span> No Third-Party Access</span>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- FEATURES -->
+    <section id="features">
+        <p class="section-label">What We Do</p>
+        <h2 class="section-title">Built for creators<br />who move fast.</h2>
+        <p class="section-body">ContentFlow helps solo creators automate their TikTok video publishing workflow using
+            TikTok's official Content Posting API — so you can focus on making content, not clicking buttons.</p>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🎬</div>
+                <h3>Direct Video Publishing</h3>
+                <p>Publish pre-produced video files directly to your own TikTok account via TikTok's official API — no
+                    browser automation, no workarounds.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📅</div>
+                <h3>Batch Upload Support</h3>
+                <p>Queue multiple videos for publishing in one go. Set captions, hashtags, and privacy levels per video
+                    — all from one place.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔐</div>
+                <h3>Secure OAuth Login</h3>
+                <p>Uses TikTok's official OAuth 2.0 login flow. ContentFlow only accesses your own account — never
+                    third-party accounts.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>Publish Status Tracking</h3>
+                <p>Real-time status polling after each upload so you always know if a video published successfully or
+                    needs attention.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🤖</div>
+                <h3>AI Content Friendly</h3>
+                <p>Designed specifically for creators producing AI-generated or AI-assisted videos — quizzes, facts,
+                    myth busters, and more.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3>Lightweight & Fast</h3>
+                <p>No bloat. ContentFlow is a focused publishing tool — not a full social media suite. Does one thing,
+                    and does it well.</p>
+            </div>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- HOW IT WORKS -->
+    <section id="how">
+        <p class="section-label">How It Works</p>
+        <h2 class="section-title">Simple three-step<br />publishing flow.</h2>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-content">
+                    <h3>Connect Your TikTok Account</h3>
+                    <p>Log in securely via TikTok's official OAuth 2.0 flow. ContentFlow only requests the minimum
+                        permissions needed to publish to your own account.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-content">
+                    <h3>Queue Your Videos</h3>
+                    <p>Select your pre-produced video files, add captions and hashtags, and configure privacy settings
+                        per post. Supports bulk queuing for efficiency.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-content">
+                    <h3>Publish & Track</h3>
+                    <p>ContentFlow initiates the upload via TikTok's Content Posting API and polls for completion status
+                        — so you know exactly when each video goes live.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <!-- USE CASES -->
+    <section id="usecases">
+        <p class="section-label">Use Cases</p>
+        <h2 class="section-title">Made for your type<br />of content.</h2>
+        <p class="section-body">ContentFlow is designed for creators of AI-assisted, fact-based, and entertainment
+            short-form content — including but not limited to:</p>
+
+        <div class="use-cases">
+            <span class="use-case-pill">🤯 Bizarre & Surprising Truths</span>
+            <span class="use-case-pill">✅ Myth vs. Truth Videos</span>
+            <span class="use-case-pill">🧠 IQ & Knowledge Quizzes</span>
+            <span class="use-case-pill">❓ Q&A Format Content</span>
+            <span class="use-case-pill">📚 Educational Shorts</span>
+            <span class="use-case-pill">🎯 Trivia Challenges</span>
+        </div>
+
+        <div class="compliance-box">
+            <h3>🛡️ TikTok Policy Compliant</h3>
+            <p>ContentFlow uses only TikTok's official Content Posting API and operates within TikTok's Developer Terms
+                of Service. All content published through ContentFlow is original, creator-owned content. ContentFlow
+                does not access or manage third-party TikTok accounts, does not scrape data, and does not automate
+                engagement (likes, comments, follows).</p>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer>
+        <a class="footer-logo" href="index.html">Content<span>Flow</span></a>
+        <div class="footer-links">
+            <a href="privacy.html">Privacy Policy</a>
+            <a href="terms.html">Terms of Service</a>
+        </div>
+        <p class="footer-copy">© 2026 ContentFlow. All rights reserved. Independent creator publishing tool.</p>
+    </footer>
+
+</body>
+
+</html>

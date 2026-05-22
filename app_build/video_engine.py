@@ -15,6 +15,10 @@ try:
 except ImportError:
     from moviepy import AudioFileClip
 
+# MoviePy v2.x removed set_start in favour of with_start; patch for compatibility
+if not hasattr(AudioFileClip, 'set_start') and hasattr(AudioFileClip, 'with_start'):
+    AudioFileClip.set_start = AudioFileClip.with_start
+
 STYLE_PRESETS = {
     "blueprint": {
         "bg_prompt_suffix": "Style of a declassified government document, dark blue and white blueprint, highly detailed.",
