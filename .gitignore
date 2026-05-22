@@ -1,0 +1,48 @@
+# Environment & credentials
+.env
+app_build/.env
+**/config/*.json
+!**/config/.gitkeep
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+.venv/
+app_build/.venv/
+
+# Generated assets & media
+app_build/assets/*.mp4
+app_build/assets/*.mp3
+app_build/assets/*.png
+app_build/assets/scraped/
+assets/scraped/
+app_build/*TEMP_MPY*
+*TEMP_MPY*
+
+# Database
+app_build/database/*.db
+
+# Test & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+app_build/.coverage
+htmlcov/
+
+# Logs & scratch files
+*.log
+scratch_*
+tmp/
+temp/
+
+# OS files
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# Kilo agent state
+.agents/
+state.json
