@@ -1050,7 +1050,7 @@ class VideoEngine:
             print("[VideoEngine] No background music files detected. Proceeding with TTS/SFX audio only.")
 
         mixed_audio = CompositeAudioClip(audio_clips_to_mix)
-        video_clip = video_clip.set_audio(mixed_audio)
+        video_clip = video_clip.with_audio(mixed_audio)
 
         codec = "h264_nvenc" if self.has_cuda else "libx264"
         threads = os.cpu_count() or 4
@@ -1447,7 +1447,7 @@ class VideoEngine:
                 pass
 
         mixed = CompositeAudioClip(audio_clips)
-        video_clip = video_clip.set_audio(mixed)
+        video_clip = video_clip.with_audio(mixed)
 
         codec = "h264_nvenc" if self.has_cuda else "libx264"
         threads = os.cpu_count() or 4
@@ -2243,7 +2243,7 @@ class VideoEngine:
             )
             # Add audio
             s1_audio = audio_clips[0].set_start(1.75)
-            s1_clip = s1_clip.set_audio(s1_audio)
+            s1_clip = s1_clip.with_audio(s1_audio)
             
             # Create Transition 1 (0.5s)
             t1_clip = self._create_transition_clip(bg_source=bg_video_2, duration=0.5)
@@ -2262,7 +2262,7 @@ class VideoEngine:
                 style_dict=st
             )
             s2_audio = audio_clips[1].set_start(1.75)
-            s2_clip = s2_clip.set_audio(s2_audio)
+            s2_clip = s2_clip.with_audio(s2_audio)
             
             # Create Transition 2 (0.5s)
             t2_clip = self._create_transition_clip(bg_source=bg_video_3, duration=0.5)
@@ -2281,7 +2281,7 @@ class VideoEngine:
                 style_dict=st
             )
             s3_audio = audio_clips[2]
-            s3_clip = s3_clip.set_audio(s3_audio)
+            s3_clip = s3_clip.with_audio(s3_audio)
             
             # Concatenate visuals & base TTS audios
             video_clip = concatenate_videoclips([s1_clip, t1_clip, s2_clip, t2_clip, s3_clip])
@@ -2448,7 +2448,7 @@ class VideoEngine:
                     print(f"[VideoEngine] WARNING: Failed to mix background music ({bg_err}).")
                     
             mixed_audio = CompositeAudioClip(audio_clips_to_mix)
-            video_clip = video_clip.set_audio(mixed_audio)
+            video_clip = video_clip.with_audio(mixed_audio)
             
             codec = "h264_nvenc" if self.has_cuda else "libx264"
             threads = os.cpu_count() or 4
