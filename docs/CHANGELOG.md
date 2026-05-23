@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.5.3] - 2026-05-23
+
+### Added
+- **Visual Style Extensions**: Introduced three brand-new aesthetic presets: `cyberpunk` (neon wireframe), `retro_vhs` (retro scanline grid), and `terminal` (monochrome phosphor computer).
+- **Kinetic Subtitle Highlights**: Introduced dynamic pulsing scaling and slight rotation sweeps to active yellow highlighted subtitle words.
+- **Audio-Reactive Waveform**: Programmed the procedural Oscilloscope to read raw audio frame levels and dynamically fluctuate its amplitude and frequency in sync with the speaker's voice.
+- **Conspiracy Redactions**: Overlaid glitch-flashing black censorship bars and `[REDACTED]` stamps over coordinates/frequency telemetry, which flash away 1.0s after narration begins.
+- **CRT Power-Off Ending Transition**: Appended a retro screen shut-down collapse animation (vertical squashing, horizontal compression, and center dot fade-out) in the final 0.8s of the ending bumper.
+- **Whistleblower Persona Prompts**: Upgraded LLM prompts in `llm_orchestrator.py` to command whistleblower claim openings (e.g. "Declassified file reveals...") and descriptive search term descriptors.
+
+### Fixed
+- **MoviePy v2.x Native compatibility**: Patched `AudioClip`, `AudioFileClip`, `VideoClip`, `VideoFileClip`, and `CompositeAudioClip` on import to add back-compat methods (`volumex`, `multiply_volume`, `fl`, `set_start`, and `subclip` mapping to `subclipped`) when running in environments with MoviePy v2.x. This resolves all mixing errors for sound effects and background music.
+- **Scene Compiler NameError**: Initialized the `bg_video_clips` list in the resource tracking section of the scene based video compiler method (`_compile_scene_based_video`) to prevent a `NameError` during the `finally` cleanup block.
+- **Pre-render bumper threads**: Upgraded `pre_render_bumpers.py` to dynamically utilize all available CPU threads during rendering.
+
+## [4.5.2] - 2026-05-23
+
+### Fixed
+- **Root-Level Bumper Resolution**: Patched `_select_starting_blueprint` and `_select_ending_blueprint` in `app_build/video_engine.py` to check both the root-level `assets/video_blueprints` folder and the app-level `app_build/assets/video_blueprints` folder, resolving `NoneType` compilation errors.
+- **Universal Bumper Narration Scripts**: Updated the starting and ending bumper scripts in `pre_render_bumpers.py` to match the user's requested wording, then rebuilt all 8 high-quality universal bumpers with the updated voiceovers and subtitles.
+
 ## [4.5.1] - 2026-05-22
 
 ### Fixed

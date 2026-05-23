@@ -28,7 +28,7 @@ CTA_ROTATION = [
     "Join the audit. New declassified files every day.",
 ]
 
-STYLES = ["blueprint", "blueprint", "chalkboard", "classified", "cyberpunk", "retro_vhs", "terminal"]
+STYLES = ["blueprint", "blueprint", "chalkboard", "classified"]
 
 
 def split_myth_ssml(ssml_script, hook_clean, context_clean, fact_clean):
@@ -307,11 +307,13 @@ def run_pipeline():
                 print(f"[Main] Myth Scene 2 SSML: {s2_ssml_wrapped}")
                 print(f"[Main] Myth Scene 3 SSML: {s3_ssml_wrapped}")
                 
-                # Build 3-element audio paths for content scenes (bumpers are pre-rendered)
+                # Build 5-element audio paths: [starting, s1, s2, s3, ending]
                 audio_paths = [
+                    asset_gen.generate_tts_audio(starting_ssml_wrapped, f"tts_{timestamp}_starting", is_ssml=True),
                     asset_gen.generate_tts_audio(s1_ssml_wrapped, f"tts_{timestamp}_s1", is_ssml=True),
                     asset_gen.generate_tts_audio(s2_ssml_wrapped, f"tts_{timestamp}_s2", is_ssml=True),
                     asset_gen.generate_tts_audio(s3_ssml_wrapped, f"tts_{timestamp}_s3", is_ssml=True),
+                    asset_gen.generate_tts_audio(ending_ssml_wrapped, f"tts_{timestamp}_ending", is_ssml=True),
                 ]
             except Exception as e:
                 print(f"[Main] ERROR: Asset Generator failed to create scene TTS MP3s: {e}")
@@ -342,7 +344,8 @@ def run_pipeline():
             clean_title = re.sub(r'[<>:"/\\|?*#]', '', title).strip().replace(' ', '_')[:100]
 
             try:
-                video_eng = VideoEngine()
+                video_seed = random.randint(0, 2**31)
+                video_eng = VideoEngine(video_seed=video_seed)
                 video_name = f"{clean_title}_{timestamp}"
                 script_payload["cta"] = cta_text
                 video_path = video_eng.compile_short(image_myth_path, image_truth_path, audio_paths, script_payload, video_name, category, style=video_style, video_type="myth")
@@ -465,9 +468,11 @@ def run_pipeline():
                 print(f"[Main] Bizarre Scene 3 SSML: {s3_ssml_wrapped}")
                 
                 audio_paths = [
+                    asset_gen.generate_tts_audio(starting_ssml_wrapped, f"bizarre_tts_{timestamp}_starting", is_ssml=True),
                     asset_gen.generate_tts_audio(s1_ssml_wrapped, f"bizarre_tts_{timestamp}_s1", is_ssml=True),
                     asset_gen.generate_tts_audio(s2_ssml_wrapped, f"bizarre_tts_{timestamp}_s2", is_ssml=True),
                     asset_gen.generate_tts_audio(s3_ssml_wrapped, f"bizarre_tts_{timestamp}_s3", is_ssml=True),
+                    asset_gen.generate_tts_audio(ending_ssml_wrapped, f"bizarre_tts_{timestamp}_ending", is_ssml=True),
                 ]
             except Exception as e:
                 print(f"[Main] ERROR: Asset Generator failed to create bizarre scene TTS MP3s: {e}")
@@ -487,7 +492,8 @@ def run_pipeline():
             clean_title = re.sub(r'[<>:"/\\|?*#]', '', title).strip().replace(' ', '_')[:100]
             
             try:
-                video_eng = VideoEngine()
+                video_seed = random.randint(0, 2**31)
+                video_eng = VideoEngine(video_seed=video_seed)
                 video_name = f"{clean_title}_{timestamp}"
                 video_path = video_eng.compile_bizarre(
                     scraped_bizarre_images, audio_paths, script_payload,
@@ -580,7 +586,8 @@ def run_pipeline():
             clean_title = re.sub(r'[<>:"/\\|?*#]', '', title).strip().replace(' ', '_')[:100]
 
             try:
-                video_eng = VideoEngine()
+                video_seed = random.randint(0, 2**31)
+                video_eng = VideoEngine(video_seed=video_seed)
                 video_name = f"{clean_title}_{timestamp}"
                 video_path = video_eng.compile_dynamic_video(
                     image_paths=image_paths,

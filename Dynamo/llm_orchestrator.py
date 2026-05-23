@@ -36,13 +36,6 @@ class ShortScriptPayload(BaseModel):
     myth_visual_prompt: str = Field(description="Visual prompt describing the misconception. MUST include: 'Style of a declassified government document, dark blue and white blueprint, highly detailed.'")
     fact_visual_prompt: str = Field(description="Visual prompt describing the actual scientific or historical truth. MUST include: 'Realistic, high-contrast, stark laboratory or historical archive photography, highly detailed.'")
     youtube_metadata: YouTubeMetadataSchema
-    mid_roll_hook: Optional[str] = Field(default="", 
-        description="Optional 3-5 word mid-roll retention hook injected naturally into scene 2. "
-        "Examples: 'But here is the twist...', 'Now pay attention...', "
-        "'And get this...', 'Here is where it gets wild...', "
-        "'But wait — it gets worse...', 'And here is the kicker...'"
-        "This must feel completely natural, not forced. "
-        "Return empty string if no natural insertion point exists.")
 
 class ShortBizarrePayload(BaseModel):
     topic: str = Field(description="The name of the bizarre historical/scientific anomaly")
@@ -65,13 +58,6 @@ class ShortBizarrePayload(BaseModel):
     scene_query_2: str = Field(default="", description="Keyword query for a photo matching the bizarre explanation (scene 2). Different from illustration_query.")
     scene_query_3: str = Field(default="", description="Keyword query for a photo matching the closing statement (scene 3). Different from the others.")
     youtube_metadata: YouTubeMetadataSchema
-    mid_roll_hook: Optional[str] = Field(default="",
-        description="Optional 3-5 word mid-roll retention hook injected naturally into scene 2. "
-        "Examples: 'But here is the twist...', 'Now pay attention...', "
-        "'And get this...', 'Here is where it gets wild...', "
-        "'But wait — it gets worse...', 'And here is the kicker...'"
-        "This must feel completely natural, not forced. "
-        "Return empty string if no natural insertion point exists.")
 
 class SmartModelsProxy:
     def __init__(self, parent_client):
@@ -324,16 +310,12 @@ class LLMOrchestrator:
         Ensures persona enforcement and strict word count (35-50 words total).
         """
         system_instruction = (
-            "You are a strict whistleblower whistleblower analyst revealing hidden anomalies.\n"
-            "Your tone is dramatic, investigative, and stern, using evocative, high-vocabulary forensic whistleblower language.\n"
-            "Start hooks strictly using whistleblower, declassified document, or whistleblower file references (e.g., 'The file they tried to bury...', 'Declassified file 942 reveals...').\n"
+            "You are a strict authoritative teacher delivering cold hard facts.\n"
+            "Your tone is dramatic, investigative, and stern, using evocative, high-vocabulary forensic language.\n"
+            "Start hooks strictly with provocative, personal statements.\n"
             "Make the debunk genuinely surprising — the audience should feel foolish for having believed the myth.\n"
             "Each scene must be 8 to 12 words. No sign-off or 'Class dismissed' in the script.\n"
-            "Ensure the visual prompts are highly descriptive, specific, and specify raw concrete details for Wikipedia/Commons image matching.\n"
-            "You must generate the complete inner SSML script conforming to the teacher prompt rules, and also supply visual prompts and youtube metadata.\n"
-            "Optionally include a 3-5 word mid-roll retention hook in scene 2 if it feels natural. "
-            "Do NOT force it — if the scene flows well without it, leave mid_roll_hook empty. "
-            "The hook should feel like a natural spoken pause before the key reveal."
+            "You must generate the complete inner SSML script conforming to the teacher prompt rules, and also supply visual prompts and youtube metadata."
         )
 
         user_prompt = (
@@ -392,15 +374,11 @@ class LLMOrchestrator:
         conforming to ShortBizarrePayload schema.
         """
         system_instruction = (
-            "You are a strict whistleblower whistleblower analyst revealing hidden anomalies.\n"
-            "Your tone is dramatic, investigative, and stern, using evocative, high-vocabulary forensic whistleblower language.\n"
-            "Start hooks strictly using whistleblower, declassified document, or whistleblower file references (e.g., 'The file they tried to bury...', 'Declassified file 942 reveals...').\n"
+            "You are a strict authoritative teacher delivering cold hard facts.\n"
+            "Your tone is dramatic, investigative, and stern, using evocative, high-vocabulary forensic language.\n"
+            "Start hooks strictly with provocative, personal statements.\n"
             "Make the bizarre twist genuinely surprising.\n"
-            "Ensure that image/scene search queries are highly specific, featuring direct scientific/historical terminology rather than broad words.\n"
-            "You must generate the complete inner SSML script conforming to the teacher prompt rules, and also supply scene queries and youtube metadata.\n"
-            "Optionally include a 3-5 word mid-roll retention hook in scene 2 if it feels natural. "
-            "Do NOT force it — if the scene flows well without it, leave mid_roll_hook empty. "
-            "The hook should feel like a natural spoken pause before the key reveal."
+            "You must generate the complete inner SSML script conforming to the teacher prompt rules, and also supply scene queries and youtube metadata."
         )
         user_prompt = f"Bizarre Topic: {topic}\nCategory: {category}\nGenerate the declassified anomaly script conforming to the ShortBizarrePayload schema."
         
@@ -451,10 +429,7 @@ class LLMOrchestrator:
             f"The script must have exactly {plan.scene_count} scenes.\n"
             "Use <break time=\"600ms\"/> between every adjacent scene (NOT 700ms or 1200ms).\n"
             "Return ONLY the inner SSML content, no speak or voice tags.\n"
-            "No markdown, no explanation, just the script.\n"
-            "Optionally include a 3-5 word mid-roll retention hook per scene if it feels natural. "
-            "Do NOT force it. "
-            "The hook should feel like a natural spoken pause before the key reveal."
+            "No markdown, no explanation, just the script."
         )
 
         scene_instructions = "\n".join(

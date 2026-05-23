@@ -19,6 +19,8 @@ app_build/assets/*.mp3
 app_build/assets/*.png
 app_build/assets/scraped/
 assets/scraped/
+assets/video_blueprints/
+sample_video.mp4
 app_build/*TEMP_MPY*
 *TEMP_MPY*
 

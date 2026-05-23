@@ -136,45 +136,43 @@ def test_bootstrap_exhaustion(tmp_path):
 def test_word_count_calculation():
     """Verifies word count parsing math logic."""
     payload = {
-        "hook": "You have been lied to.",
+        "hook": "You have been lied.",
         "context": "Vikings did not wear horns.",
         "fact": "Horned helmets were opera costumes.",
-        "sign_off": "Class dismissed."
     }
-    # Expected: 5 + 5 + 5 + 2 = 17 words
-    assert LLMOrchestrator.calculate_word_count(payload) == 17
+    # Expected: 4 + 5 + 5 = 14 words (no sign_off)
+    assert LLMOrchestrator.calculate_word_count(payload) == 14
 
 
 def test_split_myth_ssml():
-    """Verifies that split_myth_ssml correctly splits SSML containing a 1200ms break."""
+    """Verifies that split_myth_ssml correctly splits SSML into 3 clean content scenes (no CTA/sign-off)."""
     from main import split_myth_ssml
     ssml_script = (
         "<speak><voice name='en-US-Guy'>You've been lied to about glass. <break time=\"700ms\"/> "
         "Old church windows are thicker. <break time=\"1200ms\"/> "
-        "This is from medieval manufacturing. <break time=\"1000ms\"/> Class dismissed.</voice></speak>"
+        "This is from medieval manufacturing.</voice></speak>"
     )
     s1, s2, s3 = split_myth_ssml(
-        ssml_script, "hook", "context", "fact", "Class dismissed.", "Subscribe now."
+        ssml_script, "hook", "context", "fact"
     )
-    assert s1 == "You've been lied to about glass. <break time=\"700ms\"/> Old church windows are thicker."
-    assert s2 == "This is from medieval manufacturing."
-    assert s3 == "Subscribe now. <break time='550ms'/> Class dismissed."
+    assert s1 == "You've been lied to about glass."
+    assert s2 == "Old church windows are thicker."
+    assert s3 == "This is from medieval manufacturing."
 
 
 def test_split_bizarre_ssml():
-    """Verifies that split_bizarre_ssml correctly segments the SSML with breaks."""
+    """Verifies that split_bizarre_ssml correctly splits SSML into 3 clean content scenes."""
     from main import split_bizarre_ssml
     ssml_script = (
         "<speak>Never ignore the heart. <break time=\"700ms\"/> It pumps gallons. "
-        "<break time=\"1200ms\"/> But it is not a pump of emotion. <break time=\"700ms\"/> "
-        "Love lives in the brain. <break time=\"1000ms\"/> Class dismissed.</speak>"
+        "<break time=\"1200ms\"/> But it is not a pump of emotion.</speak>"
     )
     s1, s2, s3 = split_bizarre_ssml(
-        ssml_script, "hook", "story", "why", "closing", "Class dismissed.", "Follow us."
+        ssml_script, "hook", "why", "closing"
     )
-    assert s1 == "Never ignore the heart. <break time=\"700ms\"/> It pumps gallons."
-    assert s2 == "But it is not a pump of emotion."
-    assert s3 == "Love lives in the brain. <break time='500ms'/> Follow us. <break time='400ms'/> Class dismissed."
+    assert s1 == "Never ignore the heart."
+    assert s2 == "It pumps gallons."
+    assert s3 == "But it is not a pump of emotion."
 
 def test_smart_client_failover(monkeypatch):
     """Verifies that SmartGeminiClient retries free tier on 429 and falls back to paid tier."""
@@ -542,10 +540,8 @@ def test_llm_orchestrator_bizarre_generation(monkeypatch):
     bizarre_payload = orchestrator.generate_bizarre_fact("The Dancing Plague of 1518", "History")
     assert bizarre_payload["topic"] == "The Dancing Plague of 1518"
     assert bizarre_payload["hook"] == "Imagine dancing until you drop dead."
-    assert bizarre_payload["story_brief"] == "Frau Troffea began to dance in Strasbourg. Within weeks, hundreds of people joined her."
-    assert bizarre_payload["why_bizarre"] == "Dozens collapsed and died from sheer exhaustion."
-    assert bizarre_payload["closing_statement"] == "The incident remains a mystery."
-    assert bizarre_payload["sign_off"] == "Class dismissed."
+    assert bizarre_payload["why_bizarre"] == "Frau Troffea began to dance in Strasbourg. Within weeks, hundreds of people joined her."
+    assert bizarre_payload["closing_statement"] == "Dozens collapsed and died from sheer exhaustion. The incident remains a mystery. Class dismissed."
     assert bizarre_payload["is_new_prompt_style"] is True
 
 
@@ -579,8 +575,7 @@ def test_llm_orchestrator_myth_generation(monkeypatch):
     assert script_payload["topic"] == "Glass flows"
     assert script_payload["hook"] == "You are wrong about old window glass."
     assert script_payload["context"] == "Everyone believes that glass is a slow flowing liquid."
-    assert script_payload["fact"] == "But old glass is thicker at the bottom due to hand-blown manufacturing. Gravity has zero effect on solid silica."
-    assert script_payload["sign_off"] == "Class dismissed."
+    assert script_payload["fact"] == "But old glass is thicker at the bottom due to hand-blown manufacturing. Gravity has zero effect on solid silica. Class dismissed."
     assert script_payload["is_new_prompt_style"] is True
 
 
@@ -594,7 +589,6 @@ def test_ssml_script_parsing_edge_cases():
     assert parsed["hook"] == "Never ignore the heart."
     assert parsed["context"] == "It pumps gallons of blood."
     assert "not a pump" in parsed["fact"]
-    assert parsed["sign_off"] == "Class dismissed."
     
     # Test case 2: SSML with lowercase tag variants, different spaces, and custom voices
     ssml_with_tags = (
@@ -607,8 +601,7 @@ def test_ssml_script_parsing_edge_cases():
     parsed_ssml = orchestrator._parse_ssml_script(ssml_with_tags, is_bizarre=False)
     assert parsed_ssml["hook"] == "STOP eating raw apples."
     assert parsed_ssml["context"] == "Seeds contain tiny trace levels of cyanide."
-    assert parsed_ssml["fact"] == "But your gut acid neutralizes them. You would need to chew hundreds of seeds to die."
-    assert parsed_ssml["sign_off"] == "Class dismissed."
+    assert parsed_ssml["fact"] == "But your gut acid neutralizes them. You would need to chew hundreds of seeds to die. Class dismissed."
 
 
 # -----------------------------------------------------------------------------
@@ -880,7 +873,11 @@ def test_compile_scene_based_video_mocked(tmp_path, monkeypatch):
             self.audio = self
         def set_start(self, *args, **kwargs):
             return self
+        def with_start(self, *args, **kwargs):
+            return self
         def set_audio(self, *args, **kwargs):
+            return self
+        def with_audio(self, *args, **kwargs):
             return self
         def multiply_volume(self, *args, **kwargs):
             return self

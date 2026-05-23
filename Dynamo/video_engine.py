@@ -11,22 +11,13 @@ from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 try:
-    from moviepy.editor import AudioClip, AudioFileClip, VideoClip, VideoFileClip, CompositeAudioClip
+    from moviepy.editor import AudioFileClip
 except ImportError:
-    from moviepy import AudioClip, AudioFileClip, VideoClip, VideoFileClip, CompositeAudioClip
+    from moviepy import AudioFileClip
 
-# Patch clip classes for MoviePy v2.x compatibility with legacy methods
-for clip_class in [AudioClip, AudioFileClip, VideoClip, VideoFileClip, CompositeAudioClip]:
-    if not hasattr(clip_class, 'volumex') and hasattr(clip_class, 'with_volume_scaled'):
-        clip_class.volumex = clip_class.with_volume_scaled
-    if not hasattr(clip_class, 'multiply_volume') and hasattr(clip_class, 'with_volume_scaled'):
-        clip_class.multiply_volume = clip_class.with_volume_scaled
-    if not hasattr(clip_class, 'fl') and hasattr(clip_class, 'transform'):
-        clip_class.fl = clip_class.transform
-    if not hasattr(clip_class, 'set_start') and hasattr(clip_class, 'with_start'):
-        clip_class.set_start = clip_class.with_start
-    if not hasattr(clip_class, 'subclip') and hasattr(clip_class, 'subclipped'):
-        clip_class.subclip = clip_class.subclipped
+# MoviePy v2.x removed set_start in favour of with_start; patch for compatibility
+if not hasattr(AudioFileClip, 'set_start') and hasattr(AudioFileClip, 'with_start'):
+    AudioFileClip.set_start = AudioFileClip.with_start
 
 STYLE_PRESETS = {
     "blueprint": {
@@ -86,63 +77,6 @@ STYLE_PRESETS = {
         "watermark_color": (255, 60, 60),
         "timer_bar_color": (255, 60, 60),
     },
-    "cyberpunk": {
-        "bg_prompt_suffix": "Style of a futuristic cyberpunk interface, high contrast neon pink and cyan telemetry details, glowing wireframe mesh, highly detailed.",
-        "card_bg": (15, 10, 25),
-        "card_myth_outline": (255, 0, 128),
-        "card_truth_outline": (0, 242, 254),
-        "card_myth_header_bg": (255, 0, 128),
-        "card_truth_header_bg": (0, 242, 254),
-        "card_myth_header_text": (255, 255, 255),
-        "card_truth_header_text": (10, 15, 30),
-        "myth_label": "THREAT DETECTED: SYSTEM CORRUPTION",
-        "truth_label": "RESTORED DATA: VERIFIED FACT",
-        "anomaly_label": "EXHIBIT C: ANOMALOUS OVERRIDE",
-        "subtitle_color": (255, 255, 255),
-        "highlight_bg": (0, 242, 254),
-        "highlight_text": (10, 15, 30),
-        "grid_color": (255, 0, 128, 20),
-        "watermark_color": (255, 0, 128),
-        "timer_bar_color": (0, 242, 254),
-    },
-    "retro_vhs": {
-        "bg_prompt_suffix": "Style of an 80s VHS tracking screen, dark purple and magenta scanline overlay, glowing grid, synthesizer aesthetic, highly detailed.",
-        "card_bg": (20, 15, 30),
-        "card_myth_outline": (255, 100, 0),
-        "card_truth_outline": (255, 0, 255),
-        "card_myth_header_bg": (255, 100, 0),
-        "card_truth_header_bg": (255, 0, 255),
-        "card_myth_header_text": (255, 255, 255),
-        "card_truth_header_text": (255, 255, 255),
-        "myth_label": "VHS RECORD: ANALOG ERROR",
-        "truth_label": "VHS DECODED: DECLASSIFIED",
-        "anomaly_label": "VHS DECODED: UNIDENTIFIED FILE",
-        "subtitle_color": (240, 240, 250),
-        "highlight_bg": (255, 0, 255),
-        "highlight_text": (255, 255, 255),
-        "grid_color": (255, 0, 255, 20),
-        "watermark_color": (255, 100, 0),
-        "timer_bar_color": (255, 0, 255),
-    },
-    "terminal": {
-        "bg_prompt_suffix": "Style of an early 80s computer terminal, monochrome amber-green phosphors, command line telemetry coordinates, digital scanlines.",
-        "card_bg": (10, 25, 10),
-        "card_myth_outline": (0, 255, 100),
-        "card_truth_outline": (0, 255, 100),
-        "card_myth_header_bg": (0, 255, 100),
-        "card_truth_header_bg": (0, 255, 100),
-        "card_myth_header_text": (10, 25, 10),
-        "card_truth_header_text": (10, 25, 10),
-        "myth_label": "SYSTEM WARNING: FALSE ENTRY",
-        "truth_label": "SYS_VAL // ENCRYPTED_TRUTH",
-        "anomaly_label": "SYS_VAL // ANOMALOUS_LOG",
-        "subtitle_color": (150, 255, 180),
-        "highlight_bg": (0, 255, 100),
-        "highlight_text": (10, 25, 10),
-        "grid_color": (0, 255, 100, 20),
-        "watermark_color": (0, 255, 100),
-        "timer_bar_color": (0, 255, 100),
-    },
 }
 
 
@@ -162,14 +96,14 @@ class VideoEngine:
         # Set or download Montserrat Bold font
         self.font_path = font_path or os.path.join(self.fonts_dir, "Montserrat-Bold.ttf")
         self._ensure_font_exists()
-
-        # Per-video seed for deterministic randomization
-        self.video_seed = video_seed
-        # Pre-generate mascot easter egg image (always — tiny 80×100 RGBA)
-        self.mascot_img = self._generate_mascot()
         
         # Detect CUDA support once on startup
         self.has_cuda = self._detect_cuda_support()
+
+        # Per-video seed for deterministic randomization (rhythm dict)
+        self.video_seed = video_seed
+        # Pre-generate mascot easter egg image (always — tiny 80×100 RGBA)
+        self.mascot_img = self._generate_mascot()
 
     def _detect_cuda_support(self) -> bool:
         """
@@ -222,6 +156,77 @@ class VideoEngine:
         except Exception as e:
             print(f"[VideoEngine] Subprocess verification of CUDA failed: {e}. Falling back to CPU.")
         return False
+
+    def _generate_video_rhythm(self, scene_count: int, style: str) -> dict:
+        """
+        Generates a dict of per-video randomized visual parameters.
+        If self.video_seed is set, uses a local Random for deterministic jitter.
+        If None, returns dict with current hardcoded defaults (preserves old behaviour).
+        """
+        rng = random.Random(self.video_seed) if self.video_seed is not None else None
+
+        def _v(key, default, low=None, high=None):
+            if rng is None:
+                return default
+            if isinstance(default, int):
+                return rng.randint(low, high) if low is not None else default
+            if isinstance(default, float):
+                return round(rng.uniform(low, high), 2) if low is not None else default
+            return default
+
+        return {
+            # Timing
+            "card_delay":                _v("card_delay", 1.75, 1.3, 2.2),
+            "transition_dur":            _v("transition_dur", 0.5, 0.35, 0.7),
+            "card_pop_time":             _v("card_pop_time", 0.2, 0.12, 0.35),
+            # Elastic card spring
+            "elastic_k":                 _v("elastic_k", 6, 4, 8),
+            "elastic_freq":              _v("elastic_freq", 12, 8, 14),
+            # Watermark stamp
+            "stamp_start":               _v("stamp_start", 0.4, 0.3, 0.7),
+            "stamp_end":                 _v("stamp_end", 3.5, 2.5, 5.0),
+            "stamp_slam_dur":            _v("stamp_slam_dur", 0.15, 0.1, 0.25),
+            "stamp_initial_scale":       _v("stamp_initial_scale", 3.0, 2.0, 4.0),
+            # Scanlines & grit
+            "scanline_speed":            _v("scanline_speed", 120, 80, 160),
+            "grit_fps":                  _v("grit_fps", 15, 8, 24),
+            # Background zoom
+            "zoom_max":                  _v("zoom_max", 0.12, 0.08, 0.18),
+            # Ticking clock
+            "tick_interval":             _v("tick_interval", 0.6, 0.4, 1.0),
+            # Subtitle positions
+            "subtitle_y_top":            _v("subtitle_y_top", 330, 290, 370),
+            "subtitle_y_bottom":         _v("subtitle_y_bottom", 1400, 1340, 1460),
+            "subtitle_font_size":        _v("subtitle_font_size", 52, 46, 56),
+            # Bumper text
+            "bumper_font_size":          _v("bumper_font_size", 78, 70, 86),
+            "bumper_y_pos":              _v("bumper_y_pos", 800, 740, 860),
+            # Glitch transition
+            "glitch_window":             _v("glitch_window", 0.20, 0.12, 0.40),
+            "glitch_max_shift":          _v("glitch_max_shift", 50, 30, 80),
+            "glitch_max_chroma":         _v("glitch_max_chroma", 12, 8, 24),
+            "pre_transition_glitch_dur": _v("pre_transition_glitch_dur", 0.15, 0.08, 0.25),
+            # HUD
+            "radar_speed":               _v("radar_speed", 2.0, 1.5, 3.5),
+            # Post-processing
+            "blur_radius":               _v("blur_radius", 6.0, 4.0, 8.0),
+            "darken_factor":             _v("darken_factor", 0.45, 0.35, 0.55),
+            "bumper_zoom":               _v("bumper_zoom", 0.08, 0.05, 0.14),
+            # SFX volumes
+            "impact_volume":             _v("impact_volume", 0.25, 0.15, 0.35),
+            "pop_volume":                _v("pop_volume", 0.15, 0.08, 0.25),
+            "zap_volume":                _v("zap_volume", 0.08, 0.04, 0.15),
+            # Mascot easter egg
+            "mascot_enabled":            rng.random() < 0.30 if rng else False,
+            "mascot_scene":              rng.randint(0, max(0, scene_count - 1)) if rng else 0,
+            "mascot_start":              round(rng.uniform(0.5, 2.0), 2) if rng else 0.0,
+            "mascot_duration":           round(rng.uniform(0.8, 2.5), 2) if rng else 0.0,
+            "mascot_x":                  rng.choice([60, 960]) if rng else 0,
+            "mascot_y":                  rng.randint(100, 300) if rng else 0,
+            "mascot_opacity":            round(rng.uniform(0.40, 0.70), 2) if rng else 0.0,
+            # Burn transition
+            "burn_chance":               _v("burn_chance", 0.5, 0.3, 0.7),
+        }
 
     def _generate_mascot(self) -> Image.Image:
         """
@@ -358,13 +363,7 @@ class VideoEngine:
         Filters by 'myth' or 'bizarre' keyword in filename; falls back to any MP4.
         Returns None if the directory is missing or empty.
         """
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        root_start_dir = os.path.join(os.path.dirname(base_dir), "assets", "video_blueprints", "starting")
-        if os.path.exists(root_start_dir) and any(f.endswith(".mp4") for f in os.listdir(root_start_dir)):
-            start_dir = root_start_dir
-        else:
-            start_dir = os.path.join(self.assets_dir, "video_blueprints", "starting")
-            
+        start_dir = os.path.join(self.assets_dir, "video_blueprints", "starting")
         if not os.path.exists(start_dir):
             return None
         files = [f for f in os.listdir(start_dir) if f.endswith(".mp4")]
@@ -383,13 +382,7 @@ class VideoEngine:
         Prefers files with 'class' or 'dismissed' in the name.
         Returns None if the directory is missing or empty.
         """
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        root_end_dir = os.path.join(os.path.dirname(base_dir), "assets", "video_blueprints", "ending")
-        if os.path.exists(root_end_dir) and any(f.endswith(".mp4") for f in os.listdir(root_end_dir)):
-            end_dir = root_end_dir
-        else:
-            end_dir = os.path.join(self.assets_dir, "video_blueprints", "ending")
-            
+        end_dir = os.path.join(self.assets_dir, "video_blueprints", "ending")
         if not os.path.exists(end_dir):
             return None
         files = [f for f in os.listdir(end_dir) if f.endswith(".mp4")]
@@ -565,32 +558,9 @@ class VideoEngine:
             t = i / sample_rate
             freq = 50 + 200 * (t / 10.0)
             amp = 0.05 + 0.95 * (t / 10.0)
-            s = amp * math.sin(2 * math.pi * 200 * t) # riser frequency sweep
+            s = amp * math.sin(2 * math.pi * freq * t)
             riser_samples.append(s)
         synthesize_and_save("riser", riser_samples)
-
-        # 7. hum.mp3: Subtle low-frequency CRT hum (60s duration)
-        hum_samples = []
-        for i in range(int(60.0 * sample_rate)):
-            t = i / sample_rate
-            s = 0.7 * math.sin(2 * math.pi * 60 * t) + \
-                0.25 * math.sin(2 * math.pi * 120 * t) + \
-                0.05 * random.uniform(-0.5, 0.5)
-            hum_samples.append(s)
-        synthesize_and_save("hum", hum_samples)
-
-        # 8. crackle.mp3: Procedural fire crackling sound (2s)
-        crackle_samples = []
-        for i in range(int(2.0 * sample_rate)):
-            t = i / sample_rate
-            # White noise pops at random intervals
-            pop = 0.0
-            if random.random() < 0.03:
-                pop = random.uniform(0.3, 1.0) * math.exp(-200 * random.uniform(0.01, 0.03))
-            # Low-frequency rumble (60Hz sine with AM modulation)
-            rumble = 0.3 * math.sin(2 * math.pi * 60 * t) * (0.5 + 0.5 * math.sin(2 * math.pi * 4 * t))
-            crackle_samples.append(pop + rumble)
-        synthesize_and_save("crackle", crackle_samples)
 
     def _resolve_theme_music(self, category: str) -> Optional[str]:
         """Resolves background music file based on category, falling back to general background music."""
@@ -621,6 +591,7 @@ class VideoEngine:
         category-routed music, and dynamic audio ducking.
         audio_path is a 5-element list: [starting_tts, s1_tts, s2_tts, s3_tts, ending_tts]
         """
+        rhythm = self._generate_video_rhythm(3, style)
         if isinstance(audio_path, list):
             hook = script_payload.get("hook", "").strip()
             context = script_payload.get("context", "").strip()
@@ -646,20 +617,6 @@ class VideoEngine:
                 image_truth_path or image_myth_path,
                 image_truth_path or image_myth_path
             ]
-            # Build mid_roll word indices from scene 2 text
-            mid_roll_hook = script_payload.get("mid_roll_hook", "").strip().lower()
-            mid_roll_word_indices = None
-            if mid_roll_hook and len(scene_texts) > 1:
-                hook_words = mid_roll_hook.split()
-                s2_words = scene_texts[1].split()
-                mid_roll_word_indices = set()
-                for hw in hook_words:
-                    for i, w in enumerate(s2_words):
-                        if w.lower() == hw:
-                            mid_roll_word_indices.add(i)
-                if not mid_roll_word_indices:
-                    mid_roll_word_indices = None
-
             return self._compile_scene_based_video(
                 image_paths=image_paths,
                 audio_paths=audio_path,
@@ -671,7 +628,7 @@ class VideoEngine:
                 style=style,
                 is_bizarre=False,
                 video_type=video_type,
-                mid_roll_word_indices=mid_roll_word_indices
+                rhythm=rhythm
             )
 
         st = STYLE_PRESETS.get(style, STYLE_PRESETS["blueprint"])
@@ -916,9 +873,6 @@ class VideoEngine:
         
         rotated_stamp = stamp_canvas.rotate(25, expand=True, resample=Image.Resampling.BICUBIC)
 
-        use_burn_transition = random.random() < 0.5
-        burn_duration = 0.8
-
         def make_frame(t):
             """
             Frame generator function applying slow zoom, scrolling CRT scanlines, organic grit,
@@ -1003,16 +957,7 @@ class VideoEngine:
                         scaled_stamp = Image.fromarray(r_arr)
                         
                     bg_frame_img.paste(scaled_stamp, (wpx, wpy), scaled_stamp)
-
-            # --- Countdown timer bar (compile_short legacy) ---
-            bar_y = 8; bar_h = 4; bar_w = 960; bar_x = (1080 - bar_w) // 2
-            prog_val = min(1.0, t / max(duration, 0.01))
-            draw_bg.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=2, fill=(255, 255, 255, 20))
-            timer_color = st.get("timer_bar_color", st["highlight_bg"])
-            fe = int(bar_x + bar_w * prog_val)
-            if fe > bar_x:
-                draw_bg.rounded_rectangle([bar_x, bar_y, fe, bar_y + bar_h], radius=2, fill=timer_color + (100,))
-
+            
             # Convert background image to NumPy array for manipulation
             fused_arr = np.array(bg_frame_img)
             
@@ -1060,39 +1005,33 @@ class VideoEngine:
                     fused_img.paste(scaled_card, (px, py), scaled_card)
                     fused_arr = np.array(fused_img)
 
-            # 5. Glitch/Burn Transition & Camera Shake (active in a 0.4s window around fact_start_time)
+            # 5. Analog Glitch Transition & Camera Shake (active in a 0.4s window around fact_start_time)
             if fact_start_time - 0.20 <= t <= fact_start_time + 0.20:
-                if use_burn_transition:
-                    # Overlay burn edge + embers instead of glitch
-                    local_t = (t - (fact_start_time - 0.20)) / burn_duration
-                    burn_mask = self._generate_burn_mask(1080, 1920, min(1.0, local_t), self.video_seed or 0)
-                    fused_arr = (fused_arr * (1 - burn_mask[..., np.newaxis] * 0.8)).astype(np.uint8)
-                else:
-                    # Horizontal row displacement
-                    num_strips = random.randint(4, 10)
-                    for _ in range(num_strips):
-                        y_start = random.randint(0, 1919)
-                        y_end = min(1920, y_start + random.randint(15, 90))
-                        shift = random.randint(-50, 50)
-                        fused_arr[y_start:y_end, :, :] = np.roll(fused_arr[y_start:y_end, :, :], shift, axis=1)
-                    
-                    # Chromatic Aberration
-                    shift_r = random.randint(-12, 12)
-                    shift_b = random.randint(-12, 12)
-                    if shift_r != 0:
-                        fused_arr[:, :, 0] = np.roll(fused_arr[:, :, 0], shift_r, axis=1)
-                    if shift_b != 0:
-                        fused_arr[:, :, 2] = np.roll(fused_arr[:, :, 2], shift_b, axis=1)
-                    
-                    # Brightness flicker
-                    flicker_factor = random.uniform(0.75, 1.25)
-                    fused_arr = np.clip(fused_arr.astype(np.float32) * flicker_factor, 0, 255).astype(np.uint8)
-                    
-                    # Camera shake offset
-                    dx = random.randint(-15, 15)
-                    dy = random.randint(-15, 15)
-                    fused_arr = np.roll(fused_arr, dx, axis=1)
-                    fused_arr = np.roll(fused_arr, dy, axis=0)
+                # Horizontal row displacement
+                num_strips = random.randint(4, 10)
+                for _ in range(num_strips):
+                    y_start = random.randint(0, 1919)
+                    y_end = min(1920, y_start + random.randint(15, 90))
+                    shift = random.randint(-50, 50)
+                    fused_arr[y_start:y_end, :, :] = np.roll(fused_arr[y_start:y_end, :, :], shift, axis=1)
+                
+                # Chromatic Aberration
+                shift_r = random.randint(-12, 12)
+                shift_b = random.randint(-12, 12)
+                if shift_r != 0:
+                    fused_arr[:, :, 0] = np.roll(fused_arr[:, :, 0], shift_r, axis=1)
+                if shift_b != 0:
+                    fused_arr[:, :, 2] = np.roll(fused_arr[:, :, 2], shift_b, axis=1)
+                
+                # Brightness flicker
+                flicker_factor = random.uniform(0.75, 1.25)
+                fused_arr = np.clip(fused_arr.astype(np.float32) * flicker_factor, 0, 255).astype(np.uint8)
+                
+                # Camera shake offset
+                dx = random.randint(-15, 15)
+                dy = random.randint(-15, 15)
+                fused_arr = np.roll(fused_arr, dx, axis=1)
+                fused_arr = np.roll(fused_arr, dy, axis=0)
 
             # 6. Render Subtitles using PIL draw
             fused_img = Image.fromarray(fused_arr)
@@ -1263,21 +1202,6 @@ class VideoEngine:
         else:
             print("[VideoEngine] No background music files detected. Proceeding with TTS/SFX audio only.")
 
-        # Mix background low-frequency hum layer (hum.mp3)
-        hum_path = os.path.join(self.assets_dir, "sfx", "hum.mp3")
-        if os.path.exists(hum_path):
-            try:
-                hum_clip = AudioFileClip(hum_path)
-                if hasattr(hum_clip, "subclipped"):
-                    hum_sub = hum_clip.subclipped(0, min(hum_clip.duration, video_clip.duration))
-                else:
-                    hum_sub = hum_clip.subclip(0, min(hum_clip.duration, video_clip.duration))
-                hum_sub = hum_sub.multiply_volume(0.12) if hasattr(hum_sub, "multiply_volume") else hum_sub.volumex(0.12)
-                audio_clips_to_mix.append(hum_sub)
-                print("[VideoEngine] Mixed low-frequency hum background layer successfully")
-            except Exception as hum_err:
-                print(f"[VideoEngine] WARNING: Failed to mix low-frequency hum: {hum_err}")
-
         mixed_audio = CompositeAudioClip(audio_clips_to_mix)
         video_clip = video_clip.with_audio(mixed_audio)
 
@@ -1324,6 +1248,7 @@ class VideoEngine:
         Scene 3: Closing statement
         audio_path is a 5-element list: [starting_tts, s1_tts, s2_tts, s3_tts, ending_tts]
         """
+        rhythm = self._generate_video_rhythm(3, style)
         if isinstance(audio_path, list):
             hook = script_payload.get("hook", "").strip()
             why_bizarre = script_payload.get("why_bizarre", "").strip()
@@ -1349,21 +1274,7 @@ class VideoEngine:
             imgs = list(image_paths)
             while len(imgs) < 3:
                 imgs.append(imgs[-1] if imgs else "")
-
-            # Build mid_roll word indices from scene 2 text
-            mid_roll_hook = script_payload.get("mid_roll_hook", "").strip().lower()
-            mid_roll_word_indices = None
-            if mid_roll_hook and len(scene_texts) > 1:
-                hook_words = mid_roll_hook.split()
-                s2_words = scene_texts[1].split()
-                mid_roll_word_indices = set()
-                for hw in hook_words:
-                    for i, w in enumerate(s2_words):
-                        if w.lower() == hw:
-                            mid_roll_word_indices.add(i)
-                if not mid_roll_word_indices:
-                    mid_roll_word_indices = None
-
+            
             return self._compile_scene_based_video(
                 image_paths=imgs,
                 audio_paths=audio_path,
@@ -1375,7 +1286,7 @@ class VideoEngine:
                 style=style,
                 is_bizarre=True,
                 video_type=video_type,
-                mid_roll_word_indices=mid_roll_word_indices
+                rhythm=rhythm
             )
 
         st = STYLE_PRESETS.get(style, STYLE_PRESETS["blueprint"])
@@ -1891,87 +1802,23 @@ class VideoEngine:
                 # Active word check: check if it matches the overall absolute active word index
                 is_active = (words.index(w) == active_word_idx)
                 
-                # Draw highlighter box or text with Kinetic scale & rotate animations
+                # Draw highlighter box or text
                 if is_active:
-                    is_mid_roll = w.get("is_mid_roll", False)
                     box_padding_x = 10
                     box_padding_y = int(font_px_height * 0.12)
-                    canvas_w = int(word_width) + 2 * box_padding_x
-                    canvas_h = font_px_height + 2 * box_padding_y
-
-                    # Mid_roll active word: use highlight_bg as fill, pulse to 1.1x
-                    if is_mid_roll:
-                        pulse_scale = 1.0 + 0.10 * math.sin((t - w["start_time"]) * 8.0)
-                        canvas_w = int(canvas_w * pulse_scale)
-                        canvas_h = int(canvas_h * pulse_scale)
-                    else:
-                        pulse_scale = 1.0
-                    
-                    # Create temporary RGBA canvas for the active word highlight
-                    word_canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
-                    word_draw = ImageDraw.Draw(word_canvas)
-                    
-                    # Draw highlight background pill
-                    word_draw.rounded_rectangle(
-                        [0, 0, canvas_w, canvas_h],
+                    draw.rounded_rectangle(
+                        [current_x - box_padding_x, y_pos - box_padding_y, 
+                         current_x + word_width + box_padding_x, y_pos + font_px_height + box_padding_y],
                         radius=10,
                         fill=style["highlight_bg"] + (255,)
                     )
-                    # Draw word text
-                    word_draw.text((box_padding_x, box_padding_y), word_str, fill=style["highlight_text"] + (255,), font=font)
-                    
-                    # Calculate progress of word active duration
-                    word_dur = max(0.01, w["end_time"] - w["start_time"])
-                    progress = min(1.0, max(0.0, (t - w["start_time"]) / word_dur))
-                    
-                    # Apply elastic bounce scale and slight rotation angle sweep
-                    pulse_scale = 1.0 + 0.12 * math.sin(progress * math.pi)
-                    angle = -2.0 + 4.0 * progress
-                    
-                    new_w = int(canvas_w * pulse_scale)
-                    new_h = int(canvas_h * pulse_scale)
-                    
-                    if new_w > 5 and new_h > 5:
-                        word_canvas = word_canvas.resize((new_w, new_h), Image.Resampling.BILINEAR)
-                        word_canvas = word_canvas.rotate(angle, expand=True, resample=Image.Resampling.BICUBIC)
-                        
-                        orig_center_x = current_x + word_width / 2
-                        orig_center_y = y_pos + font_px_height / 2
-                        rot_w, rot_h = word_canvas.size
-                        paste_x = int(orig_center_x - rot_w / 2)
-                        paste_y = int(orig_center_y - rot_h / 2)
-                        
-                        # Paste onto main PIL Image
-                        if hasattr(draw, "_image"):
-                            draw._image.paste(word_canvas, (paste_x, paste_y), word_canvas)
-                        else:
-                            draw.text((current_x, y_pos), word_str, fill=style["highlight_text"] + (255,), font=font)
-                    else:
-                        draw.text((current_x, y_pos), word_str, fill=style["highlight_text"] + (255,), font=font)
+                    draw.text((current_x, y_pos), word_str, fill=style["highlight_text"] + (255,), font=font)
                 else:
-                    is_mid_roll = w.get("is_mid_roll", False)
                     shadow_color = (0, 0, 0)
                     shadow_offset = 3
-
-                    # Inactive mid_roll word: red tint foreshadowing
-                    if is_mid_roll and not is_active:
-                        mid_tint = style["watermark_color"] + (77,)  # 30% opacity
-                        draw.text((current_x + shadow_offset, y_pos + shadow_offset), word_str, fill=shadow_color, font=font)
-                        draw.text((current_x, y_pos), word_str, fill=mid_tint, font=font)
-                        # Underline for mid_roll words
-                        draw.line([(current_x, y_pos + font_px_height + 2),
-                                   (current_x + word_width, y_pos + font_px_height + 2)],
-                                  fill=style["watermark_color"] + (180,), width=2)
-                    else:
-                        draw.text((current_x + shadow_offset, y_pos + shadow_offset), word_str, fill=shadow_color, font=font)
-                        draw.text((current_x, y_pos), word_str, fill=style["subtitle_color"] + (255,), font=font)
-
-                # Active mid_roll word: extra emphasis (handled in active block)
-                if is_active and w.get("is_mid_roll", False):
-                    # Draw underline beneath the active word
-                    draw.line([(current_x, y_pos + font_px_height + 4),
-                               (current_x + word_width, y_pos + font_px_height + 4)],
-                              fill=style["watermark_color"] + (220,), width=3)
+                    draw.text((current_x + shadow_offset, y_pos + shadow_offset), word_str, fill=shadow_color, font=font)
+                    
+                    draw.text((current_x, y_pos), word_str, fill=style["subtitle_color"] + (255,), font=font)
                 
                 # Advance pointer
                 current_x += word_width + space_width
@@ -2128,11 +1975,14 @@ class VideoEngine:
             print(f"[VideoEngine] WARNING: Failed to generate forensic card for {image_path}: {e}")
             return None
 
-    def _create_scene_clip(self, bg_source: Any, card_image: Optional[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, audio_clip: Optional[Any] = None, mid_roll_word_indices: Optional[set] = None) -> 'VideoClip':
+    def _create_scene_clip(self, bg_source: Any, card_image: Optional[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, rhythm: dict = None) -> 'VideoClip':
         try:
             from moviepy.editor import VideoClip, VideoFileClip
         except ImportError:
             from moviepy import VideoClip, VideoFileClip
+
+        if rhythm is None:
+            rhythm = self._generate_video_rhythm(3, "blueprint")
 
         total_duration = delay_offset + audio_duration
         
@@ -2151,9 +2001,9 @@ class VideoEngine:
             base_arr = bg_source
         
         # Fonts
-        font_size = 52
+        sub_font_size = rhythm["subtitle_font_size"]
         try:
-            sub_font = ImageFont.truetype(self.font_path, font_size)
+            sub_font = ImageFont.truetype(self.font_path, sub_font_size)
         except Exception:
             sub_font = ImageFont.load_default()
             
@@ -2222,30 +2072,30 @@ class VideoEngine:
                     "word": w,
                     "start_time": current_time,
                     "end_time": current_time + w_dur,
-                    "phrase_idx": 0,
-                    "is_mid_roll": bool(mid_roll_word_indices and w_idx in mid_roll_word_indices)
+                    "phrase_idx": 0
                 })
                 current_time += w_dur
 
         def make_frame(t):
+            blur_base = rhythm["blur_radius"]
             if total_duration > 6.0 and t > 5.0:
-                blur_r = max(0.0, 6.0 - 6.0 * (t - 5.0))
+                blur_r = max(0.0, blur_base - 6.0 * (t - 5.0))
             else:
-                blur_r = 6.0
+                blur_r = blur_base
 
             if bg_video is not None:
                 bg_dur = bg_video.duration
                 raw_frame = bg_video.get_frame(t % bg_dur)
-                processed_bg = self._process_bg_frame(raw_frame, blur_radius=blur_r)
+                processed_bg = self._process_bg_frame(raw_frame, blur_radius=blur_r, darken_factor=rhythm["darken_factor"])
             elif raw_img_pil is not None:
                 img_to_process = np.array(raw_img_pil)
-                processed_bg = self._process_bg_frame(img_to_process, blur_radius=blur_r)
+                processed_bg = self._process_bg_frame(img_to_process, blur_radius=blur_r, darken_factor=rhythm["darken_factor"])
             elif base_arr is not None:
                 processed_bg = base_arr.copy()
             else:
                 processed_bg = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
-            zoom_factor = 1.0 + 0.12 * (t / total_duration)
+            zoom_factor = 1.0 + rhythm["zoom_max"] * (t / total_duration)
             h, w, c = processed_bg.shape
             new_h, new_w = int(h / zoom_factor), int(w / zoom_factor)
             top = (h - new_h) // 2
@@ -2255,24 +2105,10 @@ class VideoEngine:
             
             draw_bg = ImageDraw.Draw(bg_frame_img)
             
-            # Audio-Reactive Oscilloscope Waveform
-            amplitude = 15.0
-            freq_val = 0.02
-            if audio_clip is not None and t >= delay_offset:
-                t_audio = t - delay_offset
-                if t_audio <= audio_clip.duration:
-                    try:
-                        sample = audio_clip.get_frame(t_audio)
-                        loudness = float(np.max(np.abs(sample)))
-                        if not math.isnan(loudness):
-                            amplitude = 15.0 + 90.0 * loudness
-                            freq_val = 0.02 + 0.04 * loudness
-                    except Exception:
-                        pass
-                        
+            # Oscilloscope
             wave_points = []
             for wx in range(60, 1020, 15):
-                wy = 1580 + int(amplitude * math.sin(wx * freq_val + t * 15) * math.cos(wx * 0.007 - t * 5))
+                wy = 1580 + int(35 * math.sin(wx * 0.02 + t * 12) * math.cos(wx * 0.007 - t * 4))
                 wave_points.append((wx, wy))
             draw_bg.line(wave_points, fill=(0, 242, 254, 180), width=3)
             
@@ -2285,46 +2121,29 @@ class VideoEngine:
             # Sweeping Radar
             center_x, center_y = 540, 960
             radar_radius = 240
-            sweep_angle = t * 2.0
+            sweep_angle = t * rhythm["radar_speed"]
             for offset_idx, opacity_val in enumerate([255, 140, 70, 30]):
                 angle_offset = sweep_angle - offset_idx * 0.08
                 rx = center_x + int(radar_radius * math.cos(angle_offset))
                 ry = center_y + int(radar_radius * math.sin(angle_offset))
                 draw_bg.line([(center_x, center_y), (rx, ry)], fill=(0, 200 - offset_idx * 40, 220 - offset_idx * 40), width=2)
 
-            # Telemetry text & Conspiracy Redactions
+            # Telemetry text
             try:
                 tel_font = ImageFont.truetype(self.font_path, 18)
                 draw_bg.text((60, 320), f"SYS_OK // ACT_FRQ: {142.8 + math.sin(t)*0.5:.2f} MHz", fill=(0, 242, 254, 120), font=tel_font)
                 draw_bg.text((60, 350), f"SEC_REF: [AX-{int(t * 15) % 100:02d}]", fill=(0, 242, 254, 120), font=tel_font)
                 draw_bg.text((820, 320), f"TIME_ELAPSED: {t:.3f}s", fill=(0, 242, 254, 120), font=tel_font)
                 draw_bg.text((820, 350), "DEPT_AUDIT: LNK-OK", fill=(0, 242, 254, 120), font=tel_font)
-                
-                # Conspiracy Redactions over coordinates and frequency
-                show_redaction = True
-                if t >= delay_offset:
-                    # Glitch flash: randomly hide redaction, and permanently hide it 1 second after narration starts
-                    if t > delay_offset + 1.0 or random.random() < 0.35:
-                        show_redaction = False
-                
-                if show_redaction:
-                    # Frequency block
-                    draw_bg.rectangle([240, 320, 360, 342], fill=(10, 15, 30))
-                    # Coordinate block
-                    draw_bg.rectangle([160, 350, 245, 372], fill=(10, 15, 30))
-                    
-                    red_font = ImageFont.truetype(self.font_path, 12)
-                    draw_bg.text((245, 324), "[REDACTED]", fill=(255, 60, 60, 180), font=red_font)
-                    draw_bg.text((165, 354), "[REDACTED]", fill=(255, 60, 60, 180), font=red_font)
             except:
                 pass
 
             # Watermark slam for Scene 1
-            if scene_idx == 0 and rotated_stamp is not None and 0.4 <= t <= 3.5:
-                t_stamp = t - 0.4
-                if t_stamp < 0.15:
-                    scale = 3.0 - 2.0 * (t_stamp / 0.15)
-                    opacity = int(255 * (t_stamp / 0.15))
+            if scene_idx == 0 and rotated_stamp is not None and rhythm["stamp_start"] <= t <= rhythm["stamp_end"]:
+                t_stamp = t - rhythm["stamp_start"]
+                if t_stamp < rhythm["stamp_slam_dur"]:
+                    scale = rhythm["stamp_initial_scale"] - (rhythm["stamp_initial_scale"] - 1.0) * (t_stamp / rhythm["stamp_slam_dur"])
+                    opacity = int(255 * (t_stamp / rhythm["stamp_slam_dur"]))
                 else:
                     scale = 1.0
                     opacity = 255
@@ -2350,58 +2169,38 @@ class VideoEngine:
                 stw = draw_bg.textlength(scene_title, font=scene_title_font)
                 draw_bg.text(((1080 - stw) // 2, 120), scene_title, fill=(255, 255, 255, 200), font=scene_title_font)
 
-            # --- Per-scene countdown timer bar (top edge, subtle) ---
-            bar_y = 8
-            bar_h = 4
-            bar_w = 960
-            bar_x = (1080 - bar_w) // 2
-            if t >= delay_offset:
-                local_t = t - delay_offset
-                progress = min(1.0, local_t / max(audio_duration, 0.01))
-            else:
-                progress = 0.0
-            # Background track
-            draw_bg.rounded_rectangle([bar_x, bar_y, bar_x + bar_w, bar_y + bar_h], radius=2, fill=(255, 255, 255, 20))
-            # Progress fill
-            timer_color = style_dict.get("timer_bar_color", style_dict["highlight_bg"])
-            fill_end = int(bar_x + bar_w * progress)
-            if fill_end > bar_x:
-                draw_bg.rounded_rectangle([bar_x, bar_y, fill_end, bar_y + bar_h], radius=2, fill=timer_color + (100,))
-
             fused_arr = np.array(bg_frame_img)
             
             # Scanlines
-            drift_offset = int(t * 120) % 4
+            drift_offset = int(t * rhythm["scanline_speed"]) % 4
             drift_scanlines = np.roll(scanline_overlay, drift_offset, axis=0)
             fused_arr = (fused_arr * (1 - drift_scanlines) + (drift_scanlines * 0)).astype(np.uint8)
             
             # Grit
-            grit_idx = int(t * 15) % 10
+            grit_idx = int(t * rhythm["grit_fps"]) % 10
             fused_arr = np.clip(fused_arr.astype(np.int16) + grit_frames[grit_idx].astype(np.int16), 0, 255).astype(np.uint8)
 
-            # Mascot compositing (subtle easter egg — behind card, on top of grit)
-            if hasattr(self, 'mascot_img') and scene_idx == 0:
-                if 0.5 <= t <= 3.0:
-                    local_t = t - 0.5
-                    bounce_y = int(4 * math.sin(local_t * 2.0))
-                    mx = 60
-                    my = 100 + bounce_y
+            # Mascot compositing (subtle easter egg — behind card, scanlines, and grit)
+            if rhythm["mascot_enabled"] and scene_idx == rhythm["mascot_scene"]:
+                if rhythm["mascot_start"] <= t <= rhythm["mascot_start"] + rhythm["mascot_duration"]:
+                    local_t = t - rhythm["mascot_start"]
+                    bounce_y = int(2 * math.sin(local_t * 3.0))
+                    mx = rhythm["mascot_x"]
+                    my = rhythm["mascot_y"] + bounce_y
                     fused_img = Image.fromarray(fused_arr)
                     mascot_paste = self.mascot_img.copy()
-                    mascot_opacity = 0.55
-                    if mascot_opacity < 1.0:
+                    if rhythm["mascot_opacity"] < 1.0:
                         m_arr = np.array(mascot_paste)
-                        alpha_mod = 0.8 + 0.2 * math.sin(local_t * 1.5)
-                        m_arr[:, :, 3] = (m_arr[:, :, 3] * mascot_opacity * alpha_mod).astype(np.uint8)
+                        m_arr[:, :, 3] = (m_arr[:, :, 3] * rhythm["mascot_opacity"]).astype(np.uint8)
                         mascot_paste = Image.fromarray(m_arr)
                     fused_img.paste(mascot_paste, (mx, my), mascot_paste)
                     fused_arr = np.array(fused_img)
-
+            
             # Elastic Card
-            if card_image is not None and t >= 0.2:
-                t_elapsed = t - 0.2
+            if card_image is not None and t >= rhythm["card_pop_time"]:
+                t_elapsed = t - rhythm["card_pop_time"]
                 if t_elapsed < 1.0:
-                    s_factor = 1.0 - math.exp(-6 * t_elapsed) * math.cos(12 * t_elapsed)
+                    s_factor = 1.0 - math.exp(-rhythm["elastic_k"] * t_elapsed) * math.cos(rhythm["elastic_freq"] * t_elapsed)
                 else:
                     s_factor = 1.0
                 new_w = int(840 * s_factor)
@@ -2414,8 +2213,8 @@ class VideoEngine:
                     fused_img.paste(scaled_card, (px, py), scaled_card)
                     fused_arr = np.array(fused_img)
 
-            # Pre-transition cue visual glitch: cued at last 0.15s of the scene
-            if scene_idx < 2 and total_duration - 0.15 <= t <= total_duration:
+            # Pre-transition cue visual glitch: cued at last pre_transition_glitch_dur of the scene
+            if scene_idx < 2 and total_duration - rhythm["pre_transition_glitch_dur"] <= t <= total_duration:
                 y_start = random.randint(0, 1919)
                 y_end = min(1920, y_start + random.randint(15, 60))
                 shift = random.randint(-15, 15)
@@ -2425,7 +2224,7 @@ class VideoEngine:
                 if shift_r != 0:
                     fused_arr[:, :, 0] = np.roll(fused_arr[:, :, 0], shift_r, axis=1)
 
-            # Render Subtitles
+            # Render Subtitles (on top of everything including mascot)
             if t >= delay_offset and scene_word_timings:
                 fused_img = Image.fromarray(fused_arr)
                 draw_subs = ImageDraw.Draw(fused_img)
@@ -2445,149 +2244,6 @@ class VideoEngine:
                     pass
             clip.close = custom_close
             
-        return clip
-
-    @staticmethod
-    def _value_noise_2d(x: float, y: float, seed: int = 0) -> float:
-        """Simple hash-based value noise returning [0,1]."""
-        n = int(x * 157) ^ int(y * 311) ^ seed
-        n = (n << 13) ^ n
-        return ((n * (n * n * 60493 + 19990303) + 1376312589) & 0x7fffffff) / 0x7fffffff
-
-    @staticmethod
-    def _generate_burn_mask(w: int, h: int, progress: float, seed: int = 0) -> np.ndarray:
-        """
-        Returns a 2D float32 numpy array of shape (h, w) in range [0, 1].
-        0 = fully burnt (transparent), 1 = intact.
-        Progress 0.0 = no burn, 1.0 = fully burnt.
-        """
-        mask = np.ones((h, w), dtype=np.float32)
-        burn_edge = 1.0 - pow(progress, 0.7)  # accelerating burn from left
-        for y in range(h):
-            for x in range(w):
-                nx = x / w
-                noise_val = VideoEngine._value_noise_2d(x * 0.02, y * 0.02, seed)
-                displaced = nx + (noise_val - 0.5) * 0.3
-                if displaced < burn_edge:
-                    mask[y, x] = 0.0
-                else:
-                    # Smooth falloff near the edge
-                    dist = displaced - burn_edge
-                    mask[y, x] = min(1.0, dist * 5.0)
-        return mask
-
-    def _create_burn_transition_clip(self, bg_source: Any, duration: float = 0.8) -> 'VideoClip':
-        """Returns a VideoClip that applies a procedural burning-paper transition effect."""
-        try:
-            from moviepy.editor import VideoClip, VideoFileClip
-        except ImportError:
-            from moviepy import VideoClip, VideoFileClip
-
-        bg_video = None
-        raw_img_pil = None
-        base_arr = None
-
-        if isinstance(bg_source, str):
-            if bg_source.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
-                bg_video = VideoFileClip(bg_source)
-            else:
-                raw_img_pil = Image.open(bg_source).convert("RGB").resize((1080, 1920), Image.Resampling.LANCZOS)
-        elif hasattr(bg_source, "get_frame"):
-            bg_video = bg_source
-        else:
-            base_arr = bg_source
-
-        scanline_overlay = self._create_scanline_overlay(1080, 1920, opacity=0.15)
-
-        # Pre-compute ember positions (seeded)
-        ember_count = 30
-        embers = []
-        rng_embers = random.Random(42)
-        for _ in range(ember_count):
-            ex = rng_embers.uniform(0.0, 1.0)
-            ey = rng_embers.uniform(0.0, 1.0)
-            espeed = rng_embers.uniform(0.3, 0.8)
-            esize = rng_embers.uniform(1.0, 3.0)
-            embers.append((ex, ey, espeed, esize))
-
-        def make_frame(t):
-            progress = min(1.0, t / duration)
-            seed = int(t * 1000) % 10000
-
-            # Get base bg frame
-            if bg_video is not None:
-                bg_dur = bg_video.duration
-                raw_frame = bg_video.get_frame(t % bg_dur)
-                bg_arr = self._process_bg_frame(raw_frame, blur_radius=15.0, darken_factor=0.45)
-            elif raw_img_pil is not None:
-                glow = raw_img_pil.filter(ImageFilter.GaussianBlur(radius=15))
-                dark = Image.new("RGB", (1080, 1920), (10, 15, 30))
-                glow = Image.blend(glow, dark, 0.45)
-                bg_arr = np.array(glow)
-            else:
-                bg_arr = base_arr.copy()
-
-            # Generate burn mask and flame glow
-            burn_mask = self._generate_burn_mask(1080, 1920, progress, seed)
-            bg_arr_float = bg_arr.astype(np.float32)
-
-            # Flame glow gradient at burn edge
-            flame = np.zeros((1920, 1080, 3), dtype=np.float32)
-            edge_pos = 1.0 - pow(progress, 0.7)
-            for y in range(1920):
-                for x in range(1080):
-                    nx = x / 1080
-                    noise_v = self._value_noise_2d(x * 0.02, y * 0.02, seed)
-                    displaced = nx + (noise_v - 0.5) * 0.3
-                    dist = displaced - edge_pos
-                    if 0.0 <= dist < 0.08:
-                        intensity = 1.0 - dist / 0.08
-                        # Color ramp: yellow → orange → dark
-                        flame[y, x, 0] = 255 * intensity
-                        flame[y, x, 1] = int(200 * intensity * (1.0 - dist * 3))
-                        flame[y, x, 2] = int(50 * intensity * (1.0 - dist * 6))
-
-            # Composite
-            mask_3ch = np.stack([burn_mask] * 3, axis=-1)
-            result = bg_arr_float * mask_3ch + flame * (1.0 - mask_3ch)
-
-            # Ember particles
-            for ex, ey_base, espeed, esize in embers:
-                ey = ey_base - progress * espeed * 0.5
-                if 0 <= ey <= 1 and progress > 0.1 and progress < 0.95:
-                    ex_px = int(ex * 1080)
-                    ey_px = int(ey * 1920)
-                    brightness = max(0, 1.0 - abs(progress - 0.5) * 2)
-                    if 0 <= ex_px < 1080 and 0 <= ey_px < 1920:
-                        color = (255, int(200 * brightness), int(50 * brightness))
-                        r = int(esize)
-                        for dy in range(-r, r + 1):
-                            for dx in range(-r, r + 1):
-                                if dx * dx + dy * dy <= r * r:
-                                    px, py = ex_px + dx, ey_px + dy
-                                    if 0 <= px < 1080 and 0 <= py < 1920:
-                                        result[py, px] = np.clip(result[py, px] * 0.6 + np.array(color, dtype=np.float32) * 0.4, 0, 255)
-
-            # Add darken for burnt areas
-            result = np.clip(result, 0, 255).astype(np.uint8)
-
-            # Scanlines on top
-            drift = int(t * 240) % 4
-            scanlines = np.roll(scanline_overlay, drift, axis=0)
-            result = (result * (1 - scanlines)).astype(np.uint8)
-
-            return result
-
-        clip = VideoClip(make_frame, duration=duration)
-        if isinstance(bg_source, str) and bg_source.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')) and bg_video is not None:
-            original_close = clip.close
-            def custom_close():
-                original_close()
-                try:
-                    bg_video.close()
-                except:
-                    pass
-            clip.close = custom_close
         return clip
 
     def _create_transition_clip(self, bg_source: Any, duration: float = 0.5) -> 'VideoClip':
@@ -2668,7 +2324,7 @@ class VideoEngine:
             
         return clip
 
-    def _create_starting_bumper(self, audio_duration: float, video_type: str, style_dict: dict = None) -> 'VideoClip':
+    def _create_starting_bumper(self, audio_duration: float, video_type: str, style_dict: dict = None, rhythm: dict = None) -> 'VideoClip':
         """
         Creates the starting bumper video clip.
         Uses a blueprint video from assets/video_blueprints/starting/ (or static fallback),
@@ -2676,6 +2332,8 @@ class VideoEngine:
         """
         if style_dict is None:
             style_dict = STYLE_PRESETS["blueprint"]
+        if rhythm is None:
+            rhythm = self._generate_video_rhythm(1, "blueprint")
         try:
             from moviepy.editor import VideoClip, VideoFileClip
         except ImportError:
@@ -2705,7 +2363,7 @@ class VideoEngine:
             base_arr = np.array(Image.new("RGB", (1080, 1920), (10, 15, 30)))
 
         try:
-            bumper_font = ImageFont.truetype(self.font_path, 78)
+            bumper_font = ImageFont.truetype(self.font_path, rhythm["bumper_font_size"])
         except Exception:
             bumper_font = ImageFont.load_default()
 
@@ -2728,12 +2386,12 @@ class VideoEngine:
             if bg_video is not None:
                 bg_dur = bg_video.duration
                 raw_frame = bg_video.get_frame(t % bg_dur)
-                bg_arr = self._process_bg_frame(raw_frame, blur_radius=6.0, darken_factor=0.55)
+                bg_arr = self._process_bg_frame(raw_frame, blur_radius=rhythm["blur_radius"], darken_factor=rhythm["darken_factor"])
             else:
                 bg_arr = base_arr.copy()
 
             # Slow zoom
-            zoom_factor = 1.0 + 0.08 * (t / max(total_duration, 0.1))
+            zoom_factor = 1.0 + rhythm["bumper_zoom"] * (t / max(total_duration, 0.1))
             h, w, c = bg_arr.shape
             new_h, new_w = int(h / zoom_factor), int(w / zoom_factor)
             top = (h - new_h) // 2
@@ -2754,17 +2412,17 @@ class VideoEngine:
 
             fused_arr = np.array(frame)
             # Scanlines
-            drift = int(t * 120) % 4
+            drift = int(t * rhythm["scanline_speed"]) % 4
             scanlines = np.roll(scanline_overlay, drift, axis=0)
             fused_arr = (fused_arr * (1 - scanlines)).astype(np.uint8)
             # Grit
             fused_arr = np.clip(fused_arr.astype(np.int16) + grit_arr.astype(np.int16), 0, 255).astype(np.uint8)
 
-            # Render highlighted subtitles centered (y_pos ~800 for bumpers)
+            # Render highlighted subtitles centered
             if word_timings:
                 fused_img = Image.fromarray(fused_arr)
                 draw = ImageDraw.Draw(fused_img)
-                self._render_highlighted_subtitles(draw, bumper_font, word_timings, t, style_dict, y_pos=800, font_px_height=78)
+                self._render_highlighted_subtitles(draw, bumper_font, word_timings, t, style_dict, y_pos=rhythm["bumper_y_pos"], font_px_height=rhythm["bumper_font_size"])
                 fused_arr = np.array(fused_img)
 
             return fused_arr
@@ -2781,7 +2439,7 @@ class VideoEngine:
             clip.close = custom_close
         return clip
 
-    def _create_ending_scene(self, audio_duration: float, style_dict: dict = None) -> 'VideoClip':
+    def _create_ending_scene(self, audio_duration: float, style_dict: dict = None, rhythm: dict = None) -> 'VideoClip':
         """
         Creates the ending bumper (Class Dismissed) video clip.
         Uses a blueprint video from assets/video_blueprints/ending/ (or static fallback),
@@ -2790,6 +2448,8 @@ class VideoEngine:
         """
         if style_dict is None:
             style_dict = STYLE_PRESETS["blueprint"]
+        if rhythm is None:
+            rhythm = self._generate_video_rhythm(1, "blueprint")
         try:
             from moviepy.editor import VideoClip, VideoFileClip
         except ImportError:
@@ -2814,7 +2474,7 @@ class VideoEngine:
             base_arr = np.array(Image.new("RGB", (1080, 1920), (30, 10, 15)))
 
         try:
-            bumper_font = ImageFont.truetype(self.font_path, 72)
+            bumper_font = ImageFont.truetype(self.font_path, rhythm["bumper_font_size"])
         except Exception:
             bumper_font = ImageFont.load_default()
 
@@ -2836,11 +2496,11 @@ class VideoEngine:
             if bg_video is not None:
                 bg_dur = bg_video.duration
                 raw_frame = bg_video.get_frame(t % bg_dur)
-                bg_arr = self._process_bg_frame(raw_frame, blur_radius=6.0, darken_factor=0.55)
+                bg_arr = self._process_bg_frame(raw_frame, blur_radius=rhythm["blur_radius"], darken_factor=rhythm["darken_factor"])
             else:
                 bg_arr = base_arr.copy()
 
-            zoom_factor = 1.0 + 0.08 * (t / max(total_duration, 0.1))
+            zoom_factor = 1.0 + rhythm["bumper_zoom"] * (t / max(total_duration, 0.1))
             h, w, c = bg_arr.shape
             new_h, new_w = int(h / zoom_factor), int(w / zoom_factor)
             top = (h - new_h) // 2
@@ -2849,65 +2509,16 @@ class VideoEngine:
             frame = Image.fromarray(cropped).resize((w, h), Image.Resampling.BILINEAR)
 
             fused_arr = np.array(frame)
-            drift = int(t * 120) % 4
+            drift = int(t * rhythm["scanline_speed"]) % 4
             scanlines = np.roll(scanline_overlay, drift, axis=0)
             fused_arr = (fused_arr * (1 - scanlines)).astype(np.uint8)
 
-            # Render highlighted subtitles centered (y_pos ~800)
+            # Render highlighted subtitles centered
             if word_timings:
                 fused_img = Image.fromarray(fused_arr)
                 draw = ImageDraw.Draw(fused_img)
-                self._render_highlighted_subtitles(draw, bumper_font, word_timings, t, style_dict, y_pos=800, font_px_height=72)
+                self._render_highlighted_subtitles(draw, bumper_font, word_timings, t, style_dict, y_pos=rhythm["bumper_y_pos"], font_px_height=rhythm["bumper_font_size"])
                 fused_arr = np.array(fused_img)
-
-            # CRT Power-Off collapse transition in the last 0.8 seconds of the video
-            if t >= total_duration - 0.8:
-                dt = t - (total_duration - 0.8)
-                norm = min(1.0, dt / 0.8)
-                
-                # Canvas for rendering black background and collapse highlights
-                black_frame = Image.new("RGB", (w, h), (10, 15, 30)) # matching blueprint background tint
-                draw_collapse = ImageDraw.Draw(black_frame)
-                
-                if norm < 0.70:
-                    # Stage 1: Vertical collapse
-                    y_scale = max(0.005, 1.0 - (norm / 0.70))
-                    collapsed_h = int(h * y_scale)
-                    if collapsed_h > 1:
-                        temp_img = Image.fromarray(fused_arr).resize((w, collapsed_h), Image.Resampling.BILINEAR)
-                        py_paste = (h - collapsed_h) // 2
-                        black_frame.paste(temp_img, (0, py_paste))
-                        # Phosphor glow line
-                        draw_collapse.line([(0, h // 2), (w, h // 2)], fill=(230, 255, 255), width=max(1, int(15 * y_scale)))
-                else:
-                    # Stage 2: Horizontal collapse into dot
-                    x_scale = max(0.001, 1.0 - ((norm - 0.70) / 0.30))
-                    collapsed_w = int(w * x_scale)
-                    if collapsed_w > 1:
-                        px1 = (w - collapsed_w) // 2
-                        px2 = px1 + collapsed_w
-                        draw_collapse.line([(px1, h // 2), (px2, h // 2)], fill=(230, 255, 255), width=3)
-                    
-                    # Center dot glow
-                    dot_radius = max(1, int(12 * (1.0 - (norm - 0.70) / 0.30)))
-                    draw_collapse.ellipse(
-                        [w // 2 - dot_radius, h // 2 - dot_radius, w // 2 + dot_radius, h // 2 + dot_radius],
-                        fill=(255, 255, 255)
-                    )
-                    
-                # Overlay dynamic NumPy random static noise array scaling with norm
-                noise_amp = int(norm * 220)  # High intensity visual grit/analog static
-                if noise_amp > 2:
-                    # Gray/monochromatic static noise is more authentic for CRT
-                    noise = np.random.randint(-noise_amp, noise_amp + 1, (h, w, 1), dtype=np.int16)
-                    # Broadcast to 3 channels for RGB
-                    noise = np.repeat(noise, 3, axis=2)
-                    arr_temp = np.array(black_frame).astype(np.int16)
-                    # Apply noise to the whole frame
-                    arr_temp = np.clip(arr_temp + noise, 0, 255).astype(np.uint8)
-                    black_frame = Image.fromarray(arr_temp)
-                    
-                fused_arr = np.array(black_frame)
 
             return fused_arr
 
@@ -2963,6 +2574,7 @@ class VideoEngine:
         """
         scene_count = len(scene_texts)
         st = STYLE_PRESETS.get(style, STYLE_PRESETS["blueprint"])
+        rhythm = self._generate_video_rhythm(scene_count, style)
 
         try:
             from moviepy.editor import AudioFileClip, VideoClip, CompositeAudioClip, concatenate_videoclips, VideoFileClip
@@ -2985,7 +2597,6 @@ class VideoEngine:
         video_clip = None
         scene_clips = []
         transition_clips = []
-        burn_transition_times = []
         starting_clip = None
         ending_clip = None
 
@@ -3018,14 +2629,12 @@ class VideoEngine:
             # Generate N forensic cards
             cards = self._generate_dynamic_cards(imgs, scene_count, st)
 
-            SCENE_DELAY = 1.75
-            TRANSITION_DURATION = 0.5
-
             # ---- Clip 1: Starting Bumper ----
             starting_clip = self._create_starting_bumper(
                 audio_duration=audio_durations[0],
                 video_type=video_type,
-                style_dict=st
+                style_dict=st,
+                rhythm=rhythm
             )
             starting_audio = audio_clips[0]
             starting_clip = starting_clip.with_audio(starting_audio)
@@ -3045,8 +2654,8 @@ class VideoEngine:
             for i in range(scene_count):
                 audio_idx = i + 1  # audio_clips[0] is starting, [1..N] are scenes, [N+1] is ending
 
-                delay_offset = SCENE_DELAY if i < scene_count - 1 else 0.0
-                y_pos = 330 if i < scene_count - 1 else 1400
+                delay_offset = rhythm["card_delay"] if i < scene_count - 1 else 0.0
+                y_pos = rhythm["subtitle_y_top"] if i < scene_count - 1 else rhythm["subtitle_y_bottom"]
 
                 s_clip = self._create_scene_clip(
                     bg_source=bg_videos[i],
@@ -3059,8 +2668,7 @@ class VideoEngine:
                     scene_label=scene_labels[i],
                     scene_title=scene_titles[i],
                     style_dict=st,
-                    audio_clip=audio_clips[audio_idx],
-                    mid_roll_word_indices=None
+                    rhythm=rhythm
                 )
                 s_audio = audio_clips[audio_idx].set_start(delay_offset)
                 s_clip = s_clip.with_audio(s_audio)
@@ -3077,20 +2685,16 @@ class VideoEngine:
                 # Transition clip (except after last scene)
                 if i < scene_count - 1:
                     next_bg = bg_videos[i + 1] if (i + 1) < len(bg_videos) else bg_videos[i]
-                    use_burn = random.random() < 0.5
-                    if use_burn:
-                        t_clip = self._create_burn_transition_clip(bg_source=next_bg, duration=TRANSITION_DURATION * 1.5)
-                        burn_transition_times.append(current_start)
-                    else:
-                        t_clip = self._create_transition_clip(bg_source=next_bg, duration=TRANSITION_DURATION)
+                    t_clip = self._create_transition_clip(bg_source=next_bg, duration=rhythm["transition_dur"])
                     transition_clips.append(t_clip)
                     clip_sequence.append(t_clip)
-                    current_start += TRANSITION_DURATION
+                    current_start += rhythm["transition_dur"]
 
             # ---- Last Clip: Ending Bumper ----
             ending_clip = self._create_ending_scene(
                 audio_duration=audio_durations[-1],
-                style_dict=st
+                style_dict=st,
+                rhythm=rhythm
             )
             ending_audio = audio_clips[-1]
             ending_clip = ending_clip.with_audio(ending_audio)
@@ -3109,7 +2713,7 @@ class VideoEngine:
             # Scene speaking blocks (only actual narration, not card delay)
             for i in range(scene_count):
                 sc_start = scene_audio_starts[i]
-                s_delay = SCENE_DELAY if i < scene_count - 1 else 0.0
+                s_delay = rhythm["card_delay"] if i < scene_count - 1 else 0.0
                 speaking_blocks.append((sc_start + s_delay, sc_start + s_delay + scene_audio_durations[i]))
             # Ending bumper
             speaking_blocks.append((ending_start, ending_start + ending_dur))
@@ -3124,18 +2728,17 @@ class VideoEngine:
             tick_path = os.path.join(sfx_dir, "tick.mp3")
             impact_path = os.path.join(sfx_dir, "impact.mp3")
             riser_path = os.path.join(sfx_dir, "riser.mp3")
-            crackle_path = os.path.join(sfx_dir, "crackle.mp3")
 
-            # A. Watermark Stamp SFX at 0.4s and at each scene start + 0.4s
+            # A. Watermark Stamp SFX at stamp_start and at each scene start + stamp_start
             if os.path.exists(stamp_path):
                 try:
                     stamp_clip = AudioFileClip(stamp_path)
-                    vol = 0.25
-                    stamp_clip = stamp_clip.multiply_volume(vol) if hasattr(stamp_clip, "multiply_volume") else stamp_clip.volumex(vol)
-                    audio_clips_to_mix.append(stamp_clip.set_start(0.4))
+                    stamp_vol = rhythm["impact_volume"]
+                    stamp_clip = stamp_clip.multiply_volume(stamp_vol) if hasattr(stamp_clip, "multiply_volume") else stamp_clip.volumex(stamp_vol)
+                    audio_clips_to_mix.append(stamp_clip.set_start(rhythm["stamp_start"]))
                     for i in range(scene_count):
                         sc_start = scene_audio_starts[i]
-                        audio_clips_to_mix.append(stamp_clip.copy().set_start(sc_start + 0.4))
+                        audio_clips_to_mix.append(stamp_clip.copy().set_start(sc_start + rhythm["stamp_start"]))
                     print(f"[VideoEngine] Mixed stamp.mp3 slam SFX across {scene_count + 1} positions")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix stamp SFX: {e}")
@@ -3149,9 +2752,9 @@ class VideoEngine:
                         if i < scene_count - 1:  # No tick for the last scene (no card delay)
                             sc_start = scene_audio_starts[i]
                             t_tick = sc_start
-                            while t_tick < sc_start + SCENE_DELAY - 0.2:
+                            while t_tick < sc_start + rhythm["card_delay"] - 0.2:
                                 audio_clips_to_mix.append(tick_clip.set_start(t_tick))
-                                t_tick += 0.6
+                                t_tick += rhythm["tick_interval"]
                     print(f"[VideoEngine] Mixed ticking mechanical clock loop across {scene_count - 1} scenes")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix clock ticks: {e}")
@@ -3163,7 +2766,7 @@ class VideoEngine:
                     riser_clip = riser_clip.multiply_volume(0.15) if hasattr(riser_clip, "multiply_volume") else riser_clip.volumex(0.15)
                     for i in range(scene_count):
                         sc_start = scene_audio_starts[i]
-                        audio_clips_to_mix.append(riser_clip.subclip(10.0 - SCENE_DELAY, 10.0).set_start(sc_start))
+                        audio_clips_to_mix.append(riser_clip.subclip(10.0 - rhythm["card_delay"], 10.0).set_start(sc_start))
                     print(f"[VideoEngine] Mixed sub-bass riser build-up SFX across {scene_count} scenes")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix riser SFX: {e}")
@@ -3172,10 +2775,11 @@ class VideoEngine:
             if os.path.exists(pop_path):
                 try:
                     pop_clip = AudioFileClip(pop_path)
-                    pop_clip = pop_clip.multiply_volume(0.15) if hasattr(pop_clip, "multiply_volume") else pop_clip.volumex(0.15)
+                    pop_vol = rhythm["pop_volume"]
+                    pop_clip = pop_clip.multiply_volume(pop_vol) if hasattr(pop_clip, "multiply_volume") else pop_clip.volumex(pop_vol)
                     for i in range(scene_count):
                         sc_start = scene_audio_starts[i]
-                        audio_clips_to_mix.append(pop_clip.set_start(sc_start + 0.2))
+                        audio_clips_to_mix.append(pop_clip.set_start(sc_start + rhythm["card_pop_time"]))
                     print(f"[VideoEngine] Mixed pop.mp3 card pop SFX across {scene_count} scenes")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix pop SFX: {e}")
@@ -3184,9 +2788,10 @@ class VideoEngine:
             if os.path.exists(zap_path):
                 try:
                     zap_clip = AudioFileClip(zap_path)
-                    zap_clip = zap_clip.multiply_volume(0.08) if hasattr(zap_clip, "multiply_volume") else zap_clip.volumex(0.08)
+                    zap_vol = rhythm["zap_volume"]
+                    zap_clip = zap_clip.multiply_volume(zap_vol) if hasattr(zap_clip, "multiply_volume") else zap_clip.volumex(zap_vol)
                     for i, t_clip in enumerate(transition_clips):
-                        t_start = scene_audio_starts[i] + (SCENE_DELAY + scene_audio_durations[i])
+                        t_start = scene_audio_starts[i] + (rhythm["card_delay"] + scene_audio_durations[i])
                         audio_clips_to_mix.append(zap_clip.set_start(t_start))
                     print(f"[VideoEngine] Mixed zap.mp3 glitch transition SFX across {len(transition_clips)} transitions")
                 except Exception as e:
@@ -3196,24 +2801,14 @@ class VideoEngine:
             if os.path.exists(impact_path):
                 try:
                     impact_clip = AudioFileClip(impact_path)
-                    impact_clip = impact_clip.multiply_volume(0.25) if hasattr(impact_clip, "multiply_volume") else impact_clip.volumex(0.25)
+                    impact_vol = rhythm["impact_volume"]
+                    impact_clip = impact_clip.multiply_volume(impact_vol) if hasattr(impact_clip, "multiply_volume") else impact_clip.volumex(impact_vol)
                     for i in range(scene_count):
                         sc_start = scene_audio_starts[i]
-                        audio_clips_to_mix.append(impact_clip.set_start(sc_start + SCENE_DELAY))
+                        audio_clips_to_mix.append(impact_clip.set_start(sc_start + rhythm["card_delay"]))
                     print(f"[VideoEngine] Mixed impact.mp3 boom SFX across {scene_count} scenes")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix impact SFX: {e}")
-
-            # G. Crackle SFX for burn transitions
-            if os.path.exists(crackle_path) and burn_transition_times:
-                try:
-                    crackle_clip = AudioFileClip(crackle_path)
-                    crackle_clip = crackle_clip.multiply_volume(0.15) if hasattr(crackle_clip, "multiply_volume") else crackle_clip.volumex(0.15)
-                    for bt_start in burn_transition_times:
-                        audio_clips_to_mix.append(crackle_clip.copy().set_start(bt_start))
-                    print(f"[VideoEngine] Mixed crackle.mp3 burn SFX at {len(burn_transition_times)} positions")
-                except Exception as e:
-                    print(f"[VideoEngine] WARNING: Failed to mix crackle SFX: {e}")
 
             # ---- Dynamic Ducked Background Music ----
             bg_music_path = self._resolve_theme_music(category)
@@ -3274,21 +2869,6 @@ class VideoEngine:
                     print("[VideoEngine] Category music routed and ducked dynamically")
                 except Exception as bg_err:
                     print(f"[VideoEngine] WARNING: Failed to mix background music ({bg_err}).")
-
-            # Mix background low-frequency hum layer (hum.mp3)
-            hum_path = os.path.join(self.assets_dir, "sfx", "hum.mp3")
-            if os.path.exists(hum_path):
-                try:
-                    hum_clip = AudioFileClip(hum_path)
-                    if hasattr(hum_clip, "subclipped"):
-                        hum_sub = hum_clip.subclipped(0, min(hum_clip.duration, video_clip.duration))
-                    else:
-                        hum_sub = hum_clip.subclip(0, min(hum_clip.duration, video_clip.duration))
-                    hum_sub = hum_sub.multiply_volume(0.12) if hasattr(hum_sub, "multiply_volume") else hum_sub.volumex(0.12)
-                    audio_clips_to_mix.append(hum_sub)
-                    print("[VideoEngine] Mixed low-frequency hum background layer successfully")
-                except Exception as hum_err:
-                    print(f"[VideoEngine] WARNING: Failed to mix low-frequency hum: {hum_err}")
 
             mixed_audio = CompositeAudioClip(audio_clips_to_mix)
             video_clip = video_clip.with_audio(mixed_audio)
@@ -3351,13 +2931,15 @@ class VideoEngine:
             import gc
             gc.collect()
 
-    def _compile_scene_based_video(self, image_paths: List[str], audio_paths: List[str], scene_texts: List[str], scene_labels: List[str], scene_titles: List[str], output_name: str, category: str, style: str, is_bizarre: bool, video_type: str = "myth", mid_roll_word_indices: Optional[set] = None) -> str:
+    def _compile_scene_based_video(self, image_paths: List[str], audio_paths: List[str], scene_texts: List[str], scene_labels: List[str], scene_titles: List[str], output_name: str, category: str, style: str, is_bizarre: bool, video_type: str = "myth", rhythm: dict = None) -> str:
         """
         Compiles a video from 5 audio tracks and 7 video clips:
           [starting bumper] → [scene 1] → [transition 1] → [scene 2] → [transition 2] → [scene 3] → [ending bumper]
         audio_paths: 5-element list [starting_tts, s1_tts, s2_tts, s3_tts, ending_tts]
         scene_texts: 3-element list [s1_text, s2_text, s3_text]  (content scenes only)
         """
+        if rhythm is None:
+            rhythm = self._generate_video_rhythm(3, style)
         st = STYLE_PRESETS.get(style, STYLE_PRESETS["blueprint"])
         try:
             from moviepy.editor import AudioFileClip, VideoClip, CompositeAudioClip, concatenate_videoclips, VideoFileClip
@@ -3386,197 +2968,160 @@ class VideoEngine:
         s2_clip = None
         t2_clip = None
         s3_clip = None
-        content_video_clips = []
-        transition_clips = []
-        burn_transition_times = []
-        bg_video_clips = []
         ending_clip = None
         
         try:
-            # Load audio tracks
+            # Load 5 audio tracks [starting, s1, s2, s3, ending]
             audio_clips = [AudioFileClip(p) for p in audio_paths]
+            audio_durations = [clip.duration for clip in audio_clips]
+            print(f"[VideoEngine] Audio durations: starting={audio_durations[0]:.2f}s, s1={audio_durations[1]:.2f}s, s2={audio_durations[2]:.2f}s, s3={audio_durations[3]:.2f}s, ending={audio_durations[4]:.2f}s")
             
-            n = len(scene_texts)
+            # Resolve background sources for 3 content scenes
+            bg_video_path_1 = self._select_blueprint_video(scene_texts[0])
+            bg_video_path_2 = self._select_blueprint_video(scene_texts[1])
+            bg_video_path_3 = self._select_blueprint_video(scene_texts[2])
             
-            # Ensure we have enough labels and titles
-            while len(scene_labels) < n:
-                scene_labels.append(f"[ SCENE {len(scene_labels)+1} ]")
-            while len(scene_titles) < n:
-                scene_titles.append(f"SCENE {len(scene_titles)+1}")
+            if bg_video_path_1 and os.path.exists(bg_video_path_1):
+                try:
+                    bg_video_1 = VideoFileClip(bg_video_path_1)
+                except Exception as e:
+                    print(f"[VideoEngine] Failed to load blueprint video 1: {e}")
+            if bg_video_1 is None:
+                bg_video_1 = image_paths[0]
+                
+            if bg_video_path_2 and os.path.exists(bg_video_path_2):
+                try:
+                    bg_video_2 = VideoFileClip(bg_video_path_2)
+                except Exception as e:
+                    print(f"[VideoEngine] Failed to load blueprint video 2: {e}")
+            if bg_video_2 is None:
+                bg_video_2 = image_paths[1]
+                
+            if bg_video_path_3 and os.path.exists(bg_video_path_3):
+                try:
+                    bg_video_3 = VideoFileClip(bg_video_path_3)
+                except Exception as e:
+                    print(f"[VideoEngine] Failed to load blueprint video 3: {e}")
+            if bg_video_3 is None:
+                bg_video_3 = image_paths[2]
             
-            if len(audio_paths) == n:
-                # Pre-rendered bumpers mode: bumpers are pre-rendered video clips with baked-in audio
-                content_audio_clips = audio_clips
-                content_durations = [clip.duration for clip in content_audio_clips]
-                
-                # Load pre-rendered starting bumper directly
-                starting_bg = self._select_starting_blueprint(video_type)
-                print(f"[VideoEngine] Loading pre-rendered starting bumper: {starting_bg}")
-                starting_clip = VideoFileClip(starting_bg)
-                starting_dur = starting_clip.duration
-                
-                # Load pre-rendered ending bumper directly
-                ending_bg = self._select_ending_blueprint()
-                print(f"[VideoEngine] Loading pre-rendered ending bumper: {ending_bg}")
-                ending_clip = VideoFileClip(ending_bg)
-                ending_dur = ending_clip.duration
-                
-                # Setup audio durations representation for timeline alignment
-                audio_durations = [0.0] + content_durations + [0.0]
-            else:
-                # Dynamic bumpers mode: bumpers are generated dynamically from TTS
-                content_audio_clips = audio_clips[1:-1]
-                content_durations = [clip.duration for clip in content_audio_clips]
-                audio_durations = [clip.duration for clip in audio_clips]
-                
-                starting_clip = self._create_starting_bumper(
-                    audio_duration=audio_durations[0],
-                    video_type=video_type,
-                    style_dict=st
-                )
-                starting_audio = audio_clips[0]
-                starting_clip = starting_clip.with_audio(starting_audio)
-                starting_dur = audio_durations[0]
-                
-                ending_clip = self._create_ending_scene(
-                    audio_duration=audio_durations[-1],
-                    style_dict=st
-                )
-                ending_audio = audio_clips[-1]
-                ending_clip = ending_clip.with_audio(ending_audio)
-                ending_dur = audio_durations[-1]
+            # Generate forensic tech cards for scene 1 and scene 2
+            card_1 = self._generate_card(
+                image_path=image_paths[0],
+                label_text=st["anomaly_label"] if (is_bizarre and category == "bizarre") else st["myth_label"],
+                status_text="STATUS: ANOMALOUS RECORD" if is_bizarre else "STATUS: DEBUNKED MYTH",
+                is_truth=False,
+                style_dict=st
+            )
+            card_2 = self._generate_card(
+                image_path=image_paths[1],
+                label_text=st["truth_label"],
+                status_text="STATUS: DECLASSIFIED ANOMALY" if is_bizarre else "STATUS: VERIFIED FACT",
+                is_truth=True,
+                style_dict=st
+            )
             
-            print(f"[VideoEngine] Audio durations: starting={starting_dur:.2f}s, n={n} content scenes, ending={ending_dur:.2f}s")
+            # ---- Clip 1: Starting Bumper (delay 0s) ----
+            starting_clip = self._create_starting_bumper(
+                audio_duration=audio_durations[0],
+                video_type=video_type,
+                style_dict=st,
+                rhythm=rhythm
+            )
+            starting_audio = audio_clips[0]  # starts at 0.0
+            starting_clip = starting_clip.with_audio(starting_audio)
+            starting_dur = audio_durations[0]
             
-            # Resolve background sources for n content scenes
-            for i in range(n):
-                bg_path = self._select_blueprint_video(scene_texts[i])
-                bg_video = None
-                if bg_path and os.path.exists(bg_path):
-                    try:
-                        bg_video = VideoFileClip(bg_path)
-                    except Exception as e:
-                        print(f"[VideoEngine] Failed to load blueprint video {i+1}: {e}")
-                
-                if bg_video is None:
-                    fallback_img_path = image_paths[i] if i < len(image_paths) else image_paths[-1]
-                    bg_video = fallback_img_path
-                bg_video_clips.append(bg_video)
+            # ---- Clip 2: Scene 1 (delay 1.75s) ----
+            s1_clip = self._create_scene_clip(
+                bg_source=bg_video_1,
+                card_image=card_1,
+                audio_duration=audio_durations[1],
+                text=scene_texts[0],
+                delay_offset=rhythm["card_delay"],
+                y_pos=rhythm["subtitle_y_top"],
+                scene_idx=0,
+                scene_label=scene_labels[0],
+                scene_title=scene_titles[0],
+                style_dict=st,
+                rhythm=rhythm
+            )
+            s1_audio = audio_clips[1].set_start(rhythm["card_delay"])
+            s1_clip = s1_clip.with_audio(s1_audio)
             
-            # Generate forensic tech cards for all scenes except the last one
-            cards = []
-            for i in range(n - 1):
-                img_path = image_paths[i] if i < len(image_paths) else image_paths[-1]
-                is_truth = (i > 0)
-                
-                if not is_truth:
-                    label = st["anomaly_label"] if (is_bizarre and category == "bizarre") else st["myth_label"]
-                    status = "STATUS: ANOMALOUS RECORD" if is_bizarre else "STATUS: DEBUNKED MYTH"
-                else:
-                    label = st["truth_label"]
-                    status = "STATUS: DECLASSIFIED ANOMALY" if is_bizarre else "STATUS: VERIFIED FACT"
-                    
-                card = self._generate_card(
-                    image_path=img_path,
-                    label_text=label,
-                    status_text=status,
-                    is_truth=is_truth,
-                    style_dict=st
-                )
-                cards.append(card)
+            # ---- Clip 3: Transition 1 (0.5s) ----
+            t1_clip = self._create_transition_clip(bg_source=bg_video_2, duration=rhythm["transition_dur"])
             
-            # Calculate scene timelines
-            scene_timelines = []
-            current_time = starting_dur
+            # ---- Clip 4: Scene 2 (delay 1.75s) ----
+            s2_clip = self._create_scene_clip(
+                bg_source=bg_video_2,
+                card_image=card_2,
+                audio_duration=audio_durations[2],
+                text=scene_texts[1],
+                delay_offset=rhythm["card_delay"],
+                y_pos=rhythm["subtitle_y_top"],
+                scene_idx=1,
+                scene_label=scene_labels[1],
+                scene_title=scene_titles[1],
+                style_dict=st,
+                rhythm=rhythm
+            )
+            s2_audio = audio_clips[2].set_start(rhythm["card_delay"])
+            s2_clip = s2_clip.with_audio(s2_audio)
             
-            for i in range(n):
-                scene_start = current_time
-                if i < n - 1:
-                    # Card scenes have card pop delay of 1.75s
-                    scene_dur = 1.75 + content_durations[i]
-                else:
-                    # Final verdict scene has 0s card pop delay
-                    scene_dur = content_durations[i]
-                    
-                scene_timelines.append({
-                    "start": scene_start,
-                    "duration": scene_dur,
-                    "has_card": (i < n - 1)
-                })
-                
-                # Advance current time by scene duration
-                current_time += scene_dur
-                
-                # Transition delay between content scenes
-                if i < n - 1:
-                    current_time += 0.5
-                    
-            ending_start = current_time
-            ending_dur = ending_clip.duration
+            # ---- Clip 5: Transition 2 (0.5s) ----
+            t2_clip = self._create_transition_clip(bg_source=bg_video_3, duration=rhythm["transition_dur"])
             
-            # ---- Create content scene and transition clips ----
-            for i in range(n):
-                timeline = scene_timelines[i]
-                if timeline["has_card"]:
-                    card_image = cards[i]
-                    delay_offset = 1.75
-                    y_pos = 330
-                else:
-                    card_image = None
-                    delay_offset = 0.0
-                    y_pos = 1400
-                    
-                scene_clip = self._create_scene_clip(
-                    bg_source=bg_video_clips[i],
-                    card_image=card_image,
-                    audio_duration=content_durations[i],
-                    text=scene_texts[i],
-                    delay_offset=delay_offset,
-                    y_pos=y_pos,
-                    scene_idx=i,
-                    scene_label=scene_labels[i],
-                    scene_title=scene_titles[i],
-                    style_dict=st,
-                    audio_clip=content_audio_clips[i],
-                    mid_roll_word_indices=mid_roll_word_indices
-                )
-                
-                # Attach audio (narration starts after delay_offset)
-                scene_audio = content_audio_clips[i].set_start(delay_offset)
-                scene_clip = scene_clip.with_audio(scene_audio)
-                content_video_clips.append(scene_clip)
-                
-                # If not the last scene, create transition clip
-                if i < n - 1:
-                    use_burn = random.random() < 0.5
-                    if use_burn:
-                        t_clip = self._create_burn_transition_clip(bg_source=bg_video_clips[i+1], duration=0.75)
-                        burn_transition_times.append(scene_timelines[i]["start"] + scene_timelines[i]["duration"])
-                    else:
-                        t_clip = self._create_transition_clip(bg_source=bg_video_clips[i+1], duration=0.5)
-                    transition_clips.append(t_clip)
-                    
-            # ---- Concatenate all clips ----
-            clips_to_concatenate = [starting_clip]
-            for i in range(n):
-                clips_to_concatenate.append(content_video_clips[i])
-                if i < n - 1:
-                    clips_to_concatenate.append(transition_clips[i])
-            clips_to_concatenate.append(ending_clip)
+            # ---- Clip 6: Scene 3 (delay 0s, bottom subtitles) ----
+            s3_clip = self._create_scene_clip(
+                bg_source=bg_video_3,
+                card_image=None,
+                audio_duration=audio_durations[3],
+                text=scene_texts[2],
+                delay_offset=0.0,
+                y_pos=rhythm["subtitle_y_bottom"],
+                scene_idx=2,
+                scene_label=scene_labels[2],
+                scene_title=scene_titles[2],
+                style_dict=st,
+                rhythm=rhythm
+            )
+            s3_audio = audio_clips[3]
+            s3_clip = s3_clip.with_audio(s3_audio)
             
-            video_clip = concatenate_videoclips(clips_to_concatenate)
+            # ---- Clip 7: Ending Bumper (delay 0s) ----
+            ending_clip = self._create_ending_scene(
+                audio_duration=audio_durations[4],
+                style_dict=st,
+                rhythm=rhythm
+            )
+            ending_audio = audio_clips[4]
+            ending_clip = ending_clip.with_audio(ending_audio)
             
-            # Speaking blocks for ducking (starting, content scenes, ending)
-            speaking_blocks = [(0.0, starting_dur)]
-            for i in range(n):
-                timeline = scene_timelines[i]
-                if timeline["has_card"]:
-                    speech_start = timeline["start"] + 1.75
-                else:
-                    speech_start = timeline["start"]
-                speech_end = timeline["start"] + timeline["duration"]
-                speaking_blocks.append((speech_start, speech_end))
-            speaking_blocks.append((ending_start, ending_start + ending_dur))
+            # ---- Concatenate all 7 clips ----
+            video_clip = concatenate_videoclips([starting_clip, s1_clip, t1_clip, s2_clip, t2_clip, s3_clip, ending_clip])
+            
+            # ---- Timeline timestamps ----
+            # starting: 0 → starting_dur
+            s1_start = starting_dur
+            s1_dur = rhythm["card_delay"] + audio_durations[1]
+            t1_start = s1_start + s1_dur
+            s2_start = t1_start + rhythm["transition_dur"]
+            s2_dur = rhythm["card_delay"] + audio_durations[2]
+            t2_start = s2_start + s2_dur
+            s3_start = t2_start + rhythm["transition_dur"]
+            s3_dur = audio_durations[3]
+            ending_start = s3_start + s3_dur
+            ending_dur = audio_durations[4]
+            
+            # Speaking blocks for ducking (5 blocks: starting, s1, s2, s3, ending)
+            speaking_blocks = [
+                (0.0, starting_dur),                              # starting bumper
+                (s1_start + rhythm["card_delay"], s1_start + s1_dur),            # scene 1 narration
+                (s2_start + rhythm["card_delay"], s2_start + s2_dur),            # scene 2 narration
+                (s3_start, s3_start + s3_dur),                   # scene 3 narration
+                (ending_start, ending_start + ending_dur),        # ending bumper
+            ]
             
             audio_clips_to_mix = [video_clip.audio]
             
@@ -3588,17 +3133,15 @@ class VideoEngine:
             tick_path = os.path.join(sfx_dir, "tick.mp3")
             impact_path = os.path.join(sfx_dir, "impact.mp3")
             riser_path = os.path.join(sfx_dir, "riser.mp3")
-            crackle_path = os.path.join(sfx_dir, "crackle.mp3")
-
-            # A. Watermark Stamp SFX at 0.4s (in starting bumper) and card reveal scenes (index 1 to n-2)
+            
+            # A. Watermark Stamp SFX at stamp_start (in starting bumper) and s2_start + stamp_start
             if os.path.exists(stamp_path):
                 try:
                     stamp_clip = AudioFileClip(stamp_path)
-                    stamp_clip = stamp_clip.multiply_volume(0.25) if hasattr(stamp_clip, "multiply_volume") else stamp_clip.volumex(0.25)
-                    audio_clips_to_mix.append(stamp_clip.set_start(0.4))
-                    for i in range(1, n - 1):
-                        timeline = scene_timelines[i]
-                        audio_clips_to_mix.append(stamp_clip.copy().set_start(timeline["start"] + 0.4))
+                    stamp_vol = rhythm["impact_volume"]
+                    stamp_clip = stamp_clip.multiply_volume(stamp_vol) if hasattr(stamp_clip, "multiply_volume") else stamp_clip.volumex(stamp_vol)
+                    audio_clips_to_mix.append(stamp_clip.set_start(rhythm["stamp_start"]))
+                    audio_clips_to_mix.append(stamp_clip.copy().set_start(s2_start + rhythm["stamp_start"]))
                     print("[VideoEngine] Mixed stamp.mp3 slam SFX")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix stamp SFX: {e}")
@@ -3608,26 +3151,29 @@ class VideoEngine:
                 try:
                     tick_clip = AudioFileClip(tick_path)
                     tick_clip = tick_clip.multiply_volume(0.06) if hasattr(tick_clip, "multiply_volume") else tick_clip.volumex(0.06)
-                    for i in range(n):
-                        timeline = scene_timelines[i]
-                        if timeline["has_card"]:
-                            t_tick = timeline["start"]
-                            while t_tick < timeline["start"] + 1.75 - 0.2:
-                                audio_clips_to_mix.append(tick_clip.set_start(t_tick))
-                                t_tick += 0.6
+                    # Scene 1 ticks (during card_delay)
+                    t_tick = s1_start
+                    while t_tick < s1_start + rhythm["card_delay"] - 0.2:
+                        audio_clips_to_mix.append(tick_clip.set_start(t_tick))
+                        t_tick += rhythm["tick_interval"]
+                    # Scene 2 ticks
+                    t_tick = s2_start
+                    while t_tick < s2_start + rhythm["card_delay"] - 0.2:
+                        audio_clips_to_mix.append(tick_clip.set_start(t_tick))
+                        t_tick += rhythm["tick_interval"]
                     print("[VideoEngine] Mixed ticking mechanical clock loop")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix clock ticks: {e}")
                     
-            # C. Sub-bass riser build-up before card scenes narration
+            # C. Sub-bass riser build-up before Scene 1 and Scene 2 narration
             if os.path.exists(riser_path):
                 try:
                     riser_clip = AudioFileClip(riser_path)
                     riser_clip = riser_clip.multiply_volume(0.15) if hasattr(riser_clip, "multiply_volume") else riser_clip.volumex(0.15)
-                    for i in range(n):
-                        timeline = scene_timelines[i]
-                        if timeline["has_card"]:
-                            audio_clips_to_mix.append(riser_clip.subclip(10.0 - 1.75, 10.0).set_start(timeline["start"]))
+                    # Scene 1 riser: ends at s1_start + card_delay
+                    audio_clips_to_mix.append(riser_clip.subclip(10.0 - rhythm["card_delay"], 10.0).set_start(s1_start))
+                    # Scene 2 riser: ends at s2_start + card_delay
+                    audio_clips_to_mix.append(riser_clip.subclip(10.0 - rhythm["card_delay"], 10.0).set_start(s2_start))
                     print("[VideoEngine] Mixed sub-bass riser build-up SFX")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix riser SFX: {e}")
@@ -3636,11 +3182,10 @@ class VideoEngine:
             if os.path.exists(pop_path):
                 try:
                     pop_clip = AudioFileClip(pop_path)
-                    pop_clip = pop_clip.multiply_volume(0.15) if hasattr(pop_clip, "multiply_volume") else pop_clip.volumex(0.15)
-                    for i in range(n):
-                        timeline = scene_timelines[i]
-                        if timeline["has_card"]:
-                            audio_clips_to_mix.append(pop_clip.copy().set_start(timeline["start"] + 0.2))
+                    pop_vol = rhythm["pop_volume"]
+                    pop_clip = pop_clip.multiply_volume(pop_vol) if hasattr(pop_clip, "multiply_volume") else pop_clip.volumex(pop_vol)
+                    audio_clips_to_mix.append(pop_clip.set_start(s1_start + rhythm["card_pop_time"]))
+                    audio_clips_to_mix.append(pop_clip.copy().set_start(s2_start + rhythm["card_pop_time"]))
                     print("[VideoEngine] Mixed pop.mp3 card pop SFX")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix pop SFX: {e}")
@@ -3649,11 +3194,10 @@ class VideoEngine:
             if os.path.exists(zap_path):
                 try:
                     zap_clip = AudioFileClip(zap_path)
-                    zap_clip = zap_clip.multiply_volume(0.08) if hasattr(zap_clip, "multiply_volume") else zap_clip.volumex(0.08)
-                    for i in range(n - 1):
-                        timeline = scene_timelines[i]
-                        transition_start = timeline["start"] + timeline["duration"]
-                        audio_clips_to_mix.append(zap_clip.copy().set_start(transition_start))
+                    zap_vol = rhythm["zap_volume"]
+                    zap_clip = zap_clip.multiply_volume(zap_vol) if hasattr(zap_clip, "multiply_volume") else zap_clip.volumex(zap_vol)
+                    audio_clips_to_mix.append(zap_clip.set_start(t1_start))
+                    audio_clips_to_mix.append(zap_clip.copy().set_start(t2_start))
                     print("[VideoEngine] Mixed zap.mp3 glitch transition SFX")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix zap SFX: {e}")
@@ -3662,25 +3206,13 @@ class VideoEngine:
             if os.path.exists(impact_path):
                 try:
                     impact_clip = AudioFileClip(impact_path)
-                    impact_clip = impact_clip.multiply_volume(0.25) if hasattr(impact_clip, "multiply_volume") else impact_clip.volumex(0.25)
-                    if n > 1:
-                        timeline_1 = scene_timelines[1]
-                        audio_clips_to_mix.append(impact_clip.set_start(timeline_1["start"] + 1.75))
-                        print(f"[VideoEngine] Mixed impact.mp3 boom SFX at {timeline_1['start'] + 1.75:.2f}s")
+                    impact_vol = rhythm["impact_volume"]
+                    impact_clip = impact_clip.multiply_volume(impact_vol) if hasattr(impact_clip, "multiply_volume") else impact_clip.volumex(impact_vol)
+                    audio_clips_to_mix.append(impact_clip.set_start(s2_start + rhythm["card_delay"]))
+                    print(f"[VideoEngine] Mixed impact.mp3 boom SFX at {s2_start + rhythm['card_delay']:.2f}s")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix impact SFX: {e}")
-
-            # G. Crackle SFX for burn transitions
-            if os.path.exists(crackle_path) and burn_transition_times:
-                try:
-                    crackle_clip = AudioFileClip(crackle_path)
-                    crackle_clip = crackle_clip.multiply_volume(0.15) if hasattr(crackle_clip, "multiply_volume") else crackle_clip.volumex(0.15)
-                    for bt_start in burn_transition_times:
-                        audio_clips_to_mix.append(crackle_clip.copy().set_start(bt_start))
-                    print(f"[VideoEngine] Mixed crackle.mp3 burn SFX at {len(burn_transition_times)} positions")
-                except Exception as e:
-                    print(f"[VideoEngine] WARNING: Failed to mix crackle SFX: {e}")
-
+                    
             # Dynamic Ducked Background Music
             bg_music_path = self._resolve_theme_music(category)
             
@@ -3741,21 +3273,6 @@ class VideoEngine:
                 except Exception as bg_err:
                     print(f"[VideoEngine] WARNING: Failed to mix background music ({bg_err}).")
                     
-            # Mix background low-frequency hum layer (hum.mp3)
-            hum_path = os.path.join(self.assets_dir, "sfx", "hum.mp3")
-            if os.path.exists(hum_path):
-                try:
-                    hum_clip = AudioFileClip(hum_path)
-                    if hasattr(hum_clip, "subclipped"):
-                        hum_sub = hum_clip.subclipped(0, min(hum_clip.duration, video_clip.duration))
-                    else:
-                        hum_sub = hum_clip.subclip(0, min(hum_clip.duration, video_clip.duration))
-                    hum_sub = hum_sub.multiply_volume(0.12) if hasattr(hum_sub, "multiply_volume") else hum_sub.volumex(0.12)
-                    audio_clips_to_mix.append(hum_sub)
-                    print("[VideoEngine] Mixed low-frequency hum background layer successfully")
-                except Exception as hum_err:
-                    print(f"[VideoEngine] WARNING: Failed to mix low-frequency hum: {hum_err}")
-
             mixed_audio = CompositeAudioClip(audio_clips_to_mix)
             video_clip = video_clip.with_audio(mixed_audio)
             
@@ -3787,23 +3304,7 @@ class VideoEngine:
                         c.close()
                     except:
                         pass
-            if starting_clip:
-                try:
-                    starting_clip.close()
-                except:
-                    pass
-            if ending_clip:
-                try:
-                    ending_clip.close()
-                except:
-                    pass
-            for clip_ref in content_video_clips:
-                if clip_ref:
-                    try:
-                        clip_ref.close()
-                    except:
-                        pass
-            for clip_ref in transition_clips:
+            for clip_ref in [starting_clip, s1_clip, t1_clip, s2_clip, t2_clip, s3_clip, ending_clip]:
                 if clip_ref:
                     try:
                         clip_ref.close()
@@ -3824,7 +3325,7 @@ class VideoEngine:
                     mixed_audio.close()
                 except:
                     pass
-            for bg_v in bg_video_clips:
+            for bg_v in [bg_video_1, bg_video_2, bg_video_3]:
                 if bg_v and hasattr(bg_v, "close"):
                     try:
                         bg_v.close()
