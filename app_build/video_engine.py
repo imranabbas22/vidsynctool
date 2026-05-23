@@ -273,7 +273,9 @@ class VideoEngine:
         if not mp4_files:
             return None
             
-        search_lower = search_text.lower() if search_text else ""
+        import re
+        search_text_clean = re.sub(r'<[^>]+>', '', search_text) if search_text else ""
+        search_lower = search_text_clean.lower()
         
         keyword_mapping = {
             "dna": "DNA_double_helix",
@@ -622,9 +624,9 @@ class VideoEngine:
         audio_path is a 5-element list: [starting_tts, s1_tts, s2_tts, s3_tts, ending_tts]
         """
         if isinstance(audio_path, list):
-            hook = script_payload.get("hook", "").strip()
-            context = script_payload.get("context", "").strip()
-            fact = script_payload.get("fact", "").strip()
+            hook = script_payload.get("s1_ssml", script_payload.get("hook_ssml", script_payload.get("hook", ""))).strip()
+            context = script_payload.get("s2_ssml", script_payload.get("context_ssml", script_payload.get("context", ""))).strip()
+            fact = script_payload.get("s3_ssml", script_payload.get("fact_ssml", script_payload.get("fact", ""))).strip()
             
             scene_texts = [
                 hook,
@@ -660,6 +662,9 @@ class VideoEngine:
                 if not mid_roll_word_indices:
                     mid_roll_word_indices = None
 
+            starting_text = script_payload.get("starting_text")
+            ending_text = script_payload.get("ending_text")
+
             return self._compile_scene_based_video(
                 image_paths=image_paths,
                 audio_paths=audio_path,
@@ -671,7 +676,9 @@ class VideoEngine:
                 style=style,
                 is_bizarre=False,
                 video_type=video_type,
-                mid_roll_word_indices=mid_roll_word_indices
+                mid_roll_word_indices=mid_roll_word_indices,
+                starting_text=starting_text,
+                ending_text=ending_text
             )
 
         st = STYLE_PRESETS.get(style, STYLE_PRESETS["blueprint"])
@@ -684,6 +691,7 @@ class VideoEngine:
         
         output_video_path = os.path.join(self.assets_dir, f"{output_name}.mp4")
         print(f"[VideoEngine] Initializing video compilation for: {output_video_path}")
+        tmp_files = []
         
         # 0. Ensure sound effects exist
         self._ensure_sfx_exist()
@@ -1279,7 +1287,7 @@ class VideoEngine:
                 print(f"[VideoEngine] WARNING: Failed to mix low-frequency hum: {hum_err}")
 
         mixed_audio = CompositeAudioClip(audio_clips_to_mix)
-        video_clip = video_clip.with_audio(mixed_audio)
+        video_clip, tmp_files = self._normalize_and_attach_audio(video_clip, mixed_audio, output_name)
 
         codec = "h264_nvenc" if self.has_cuda else "libx264"
         threads = os.cpu_count() or 4
@@ -1293,6 +1301,13 @@ class VideoEngine:
         )
         
         video_clip.close()
+        # Clean up temp files
+        for f_path in tmp_files:
+            if os.path.exists(f_path):
+                try:
+                    os.remove(f_path)
+                except:
+                    pass
         audio_clip.close()
         if bg_music_clip:
             bg_music_clip.close()
@@ -1325,9 +1340,9 @@ class VideoEngine:
         audio_path is a 5-element list: [starting_tts, s1_tts, s2_tts, s3_tts, ending_tts]
         """
         if isinstance(audio_path, list):
-            hook = script_payload.get("hook", "").strip()
-            why_bizarre = script_payload.get("why_bizarre", "").strip()
-            closing = script_payload.get("closing_statement", "").strip()
+            hook = script_payload.get("s1_ssml", script_payload.get("hook_ssml", script_payload.get("hook", ""))).strip()
+            why_bizarre = script_payload.get("s2_ssml", script_payload.get("why_bizarre_ssml", script_payload.get("why_bizarre", ""))).strip()
+            closing = script_payload.get("s3_ssml", script_payload.get("closing_statement_ssml", script_payload.get("closing_statement", ""))).strip()
             
             scene_texts = [
                 hook,
@@ -1364,6 +1379,9 @@ class VideoEngine:
                 if not mid_roll_word_indices:
                     mid_roll_word_indices = None
 
+            starting_text = script_payload.get("starting_text")
+            ending_text = script_payload.get("ending_text")
+
             return self._compile_scene_based_video(
                 image_paths=imgs,
                 audio_paths=audio_path,
@@ -1375,7 +1393,9 @@ class VideoEngine:
                 style=style,
                 is_bizarre=True,
                 video_type=video_type,
-                mid_roll_word_indices=mid_roll_word_indices
+                mid_roll_word_indices=mid_roll_word_indices,
+                starting_text=starting_text,
+                ending_text=ending_text
             )
 
         st = STYLE_PRESETS.get(style, STYLE_PRESETS["blueprint"])
@@ -1803,6 +1823,43 @@ class VideoEngine:
             
         return words
 
+    def _normalize_and_attach_audio(self, video_clip, mixed_audio, output_name: str) -> Tuple[Any, List[str]]:
+        """
+        Exports the composite mixed_audio to a temporary wav, performs -14 LUFS/dBFS loudness
+        normalization (with a peak ceiling of -1.0 dBFS to prevent clipping) using pydub,
+        and returns the updated video_clip along with a list of temporary file paths to clean up.
+        """
+        temp_wav = os.path.join(self.assets_dir, f"temp_{output_name}_audio_raw.wav")
+        norm_wav = os.path.join(self.assets_dir, f"temp_{output_name}_audio_norm.wav")
+        tmp_files = []
+        
+        try:
+            from pydub import AudioSegment
+            # Export raw mix
+            mixed_audio.write_audiofile(temp_wav, fps=44100, nbytes=2, codec="pcm_s16le", logger=None)
+            tmp_files.append(temp_wav)
+            
+            # Load and normalize
+            sound = AudioSegment.from_file(temp_wav)
+            change_in_dB = -14.0 - sound.dBFS
+            normalized = sound.apply_gain(change_in_dB)
+            if normalized.max_dBFS > -1.0:
+                reduction = normalized.max_dBFS - (-1.0)
+                normalized = normalized.apply_gain(-reduction)
+                
+            normalized.export(norm_wav, format="wav")
+            tmp_files.append(norm_wav)
+            
+            # Load normalized back to moviepy
+            norm_audio_clip = AudioFileClip(norm_wav)
+            video_clip = video_clip.with_audio(norm_audio_clip)
+            print(f"[VideoEngine] Loudness normalized successfully to -14 dBFS target (max peak: {normalized.max_dBFS:.2f} dBFS)")
+        except Exception as err:
+            print(f"[VideoEngine] WARNING: pydub loudness normalization failed ({err}). Falling back to original mixed audio.")
+            video_clip = video_clip.with_audio(mixed_audio)
+            
+        return video_clip, tmp_files
+
     def _create_scanline_overlay(self, width: int, height: int, opacity: float) -> np.ndarray:
         """Generates a static horizontal CRT scanline mesh overlay matrix."""
         # 1-pixel dark line every 4 pixels
@@ -1894,6 +1951,7 @@ class VideoEngine:
                 # Draw highlighter box or text with Kinetic scale & rotate animations
                 if is_active:
                     is_mid_roll = w.get("is_mid_roll", False)
+                    is_emp = w.get("is_emphasized", False)
                     box_padding_x = 10
                     box_padding_y = int(font_px_height * 0.12)
                     canvas_w = int(word_width) + 2 * box_padding_x
@@ -1911,14 +1969,17 @@ class VideoEngine:
                     word_canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
                     word_draw = ImageDraw.Draw(word_canvas)
                     
-                    # Draw highlight background pill
+                    # Draw highlight background pill: if emphasized, use outline color with white text
+                    pill_fill = style.get("card_myth_outline", (255, 75, 75)) + (255,) if is_emp else style["highlight_bg"] + (255,)
+                    text_fill = (255, 255, 255, 255) if is_emp else style["highlight_text"] + (255,)
+                    
                     word_draw.rounded_rectangle(
                         [0, 0, canvas_w, canvas_h],
                         radius=10,
-                        fill=style["highlight_bg"] + (255,)
+                        fill=pill_fill
                     )
                     # Draw word text
-                    word_draw.text((box_padding_x, box_padding_y), word_str, fill=style["highlight_text"] + (255,), font=font)
+                    word_draw.text((box_padding_x, box_padding_y), word_str, fill=text_fill, font=font)
                     
                     # Calculate progress of word active duration
                     word_dur = max(0.01, w["end_time"] - w["start_time"])
@@ -1926,6 +1987,8 @@ class VideoEngine:
                     
                     # Apply elastic bounce scale and slight rotation angle sweep
                     pulse_scale = 1.0 + 0.12 * math.sin(progress * math.pi)
+                    if is_emp:
+                        pulse_scale *= 1.2
                     angle = -2.0 + 4.0 * progress
                     
                     new_w = int(canvas_w * pulse_scale)
@@ -1945,11 +2008,12 @@ class VideoEngine:
                         if hasattr(draw, "_image"):
                             draw._image.paste(word_canvas, (paste_x, paste_y), word_canvas)
                         else:
-                            draw.text((current_x, y_pos), word_str, fill=style["highlight_text"] + (255,), font=font)
+                            draw.text((current_x, y_pos), word_str, fill=text_fill, font=font)
                     else:
-                        draw.text((current_x, y_pos), word_str, fill=style["highlight_text"] + (255,), font=font)
+                        draw.text((current_x, y_pos), word_str, fill=text_fill, font=font)
                 else:
                     is_mid_roll = w.get("is_mid_roll", False)
+                    is_emp = w.get("is_emphasized", False)
                     shadow_color = (0, 0, 0)
                     shadow_offset = 3
 
@@ -1962,6 +2026,10 @@ class VideoEngine:
                         draw.line([(current_x, y_pos + font_px_height + 2),
                                    (current_x + word_width, y_pos + font_px_height + 2)],
                                   fill=style["watermark_color"] + (180,), width=2)
+                    elif is_emp:
+                        # Inactive emphasized words: render in style["highlight_bg"] instead of standard white style["subtitle_color"]
+                        draw.text((current_x + shadow_offset, y_pos + shadow_offset), word_str, fill=shadow_color, font=font)
+                        draw.text((current_x, y_pos), word_str, fill=style["highlight_bg"] + (255,), font=font)
                     else:
                         draw.text((current_x + shadow_offset, y_pos + shadow_offset), word_str, fill=shadow_color, font=font)
                         draw.text((current_x, y_pos), word_str, fill=style["subtitle_color"] + (255,), font=font)
@@ -2128,7 +2196,7 @@ class VideoEngine:
             print(f"[VideoEngine] WARNING: Failed to generate forensic card for {image_path}: {e}")
             return None
 
-    def _create_scene_clip(self, bg_source: Any, card_image: Optional[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, audio_clip: Optional[Any] = None, mid_roll_word_indices: Optional[set] = None) -> 'VideoClip':
+    def _create_scene_clip(self, bg_source: Any, card_image: Optional[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, audio_clip: Optional[Any] = None, mid_roll_word_indices: Optional[set] = None, is_last_scene: bool = False) -> 'VideoClip':
         try:
             from moviepy.editor import VideoClip, VideoFileClip
         except ImportError:
@@ -2209,21 +2277,24 @@ class VideoEngine:
             grit_img = grit_img.filter(ImageFilter.GaussianBlur(radius=0.5))
             grit_frames.append(np.array(grit_img))
 
-        # Local word timings calculation for this scene
-        words = text.split()
+        # Local word timings calculation for this scene using SSML parser
+        words_info = self._parse_ssml_words_emphasis(text)
         scene_word_timings = []
-        if words and audio_duration > 0:
-            total_chars = sum(len(w) for w in words)
-            sec_per_char = audio_duration / total_chars
+        if words_info and audio_duration > 0:
+            total_chars = sum(len(w_info["word"]) for w_info in words_info)
+            sec_per_char = audio_duration / total_chars if total_chars > 0 else 0.1
             current_time = delay_offset
-            for w_idx, w in enumerate(words):
-                w_dur = len(w) * sec_per_char
+            for w_idx, w_info in enumerate(words_info):
+                w_str = w_info["word"]
+                is_emp = w_info["is_emphasized"]
+                w_dur = len(w_str) * sec_per_char
                 scene_word_timings.append({
-                    "word": w,
+                    "word": w_str,
                     "start_time": current_time,
                     "end_time": current_time + w_dur,
                     "phrase_idx": 0,
-                    "is_mid_roll": bool(mid_roll_word_indices and w_idx in mid_roll_word_indices)
+                    "is_mid_roll": bool(mid_roll_word_indices and w_idx in mid_roll_word_indices),
+                    "is_emphasized": is_emp
                 })
                 current_time += w_dur
 
@@ -2246,6 +2317,11 @@ class VideoEngine:
                 processed_bg = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
             zoom_factor = 1.0 + 0.12 * (t / total_duration)
+            if is_last_scene and t >= delay_offset:
+                t_audio = t - delay_offset
+                if t_audio < 0.5:
+                    extra_zoom = 0.15 * math.sin((t_audio / 0.5) * math.pi)
+                    zoom_factor += extra_zoom
             h, w, c = processed_bg.shape
             new_h, new_w = int(h / zoom_factor), int(w / zoom_factor)
             top = (h - new_h) // 2
@@ -2461,20 +2537,96 @@ class VideoEngine:
         0 = fully burnt (transparent), 1 = intact.
         Progress 0.0 = no burn, 1.0 = fully burnt.
         """
-        mask = np.ones((h, w), dtype=np.float32)
-        burn_edge = 1.0 - pow(progress, 0.7)  # accelerating burn from left
-        for y in range(h):
-            for x in range(w):
-                nx = x / w
-                noise_val = VideoEngine._value_noise_2d(x * 0.02, y * 0.02, seed)
-                displaced = nx + (noise_val - 0.5) * 0.3
-                if displaced < burn_edge:
-                    mask[y, x] = 0.0
-                else:
-                    # Smooth falloff near the edge
-                    dist = displaced - burn_edge
-                    mask[y, x] = min(1.0, dist * 5.0)
+        xx, yy = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+        x_scaled = (xx * 0.02 * 157).astype(np.int32)
+        y_scaled = (yy * 0.02 * 311).astype(np.int32)
+        
+        n = x_scaled ^ y_scaled ^ seed
+        n = (n << 13) ^ n
+        term = n * (n * n * 60493 + 19990303) + 1376312589
+        noise_val = (term & 0x7fffffff).astype(np.float32) / 0x7fffffff
+        
+        nx = xx / w
+        displaced = nx + (noise_val - 0.5) * 0.3
+        burn_edge = 1.0 - pow(progress, 0.7)
+        
+        mask = np.clip((displaced - burn_edge) * 5.0, 0.0, 1.0)
         return mask
+
+    def _add_global_progress_bar(self, clip, style_dict, height=6):
+        duration = clip.duration
+        color = style_dict.get("timer_bar_color", style_dict.get("highlight_bg", (0, 242, 254)))
+        
+        def filter_frame(gf, t):
+            frame = gf(t)
+            try:
+                frame[0, 0] = frame[0, 0]
+                writeable_frame = frame
+            except ValueError:
+                writeable_frame = frame.copy()
+                
+            h, w, c = writeable_frame.shape
+            progress = min(1.0, t / duration)
+            fill_width = int(w * progress)
+            if fill_width > 0:
+                writeable_frame[h - height:h, 0:fill_width, :] = color
+            return writeable_frame
+            
+        return clip.fl(filter_frame)
+
+    def _parse_ssml_words_emphasis(self, ssml_text: str) -> list:
+        """
+        Parses an SSML string (potentially containing <emphasis> tags) and returns a list of dictionaries:
+        [{"word": clean_word_string, "is_emphasized": bool}]
+        Uses xml.etree.ElementTree with a fallback to regex.
+        """
+        import xml.etree.ElementTree as ET
+        import re
+        
+        # Clean text of basic break tags before wrapping
+        cleaned_ssml = ssml_text.replace("&", "&amp;")
+        wrapped = f"<root>{cleaned_ssml}</root>"
+        
+        try:
+            root = ET.fromstring(wrapped)
+            words_info = []
+            
+            def recurse(node, in_emphasis=False):
+                is_emp = in_emphasis or (node.tag == 'emphasis')
+                
+                if node.text:
+                    for w in node.text.split():
+                        words_info.append({"word": w, "is_emphasized": is_emp})
+                        
+                for child in node:
+                    recurse(child, is_emp)
+                    if child.tail:
+                        for w in child.tail.split():
+                            words_info.append({"word": w, "is_emphasized": in_emphasis})
+                            
+            recurse(root)
+            if words_info:
+                return words_info
+        except Exception as e:
+            pass
+            
+        # Fallback to regex
+        emphasis_pattern = re.compile(r'<emphasis[^>]*>(.*?)</emphasis>', re.IGNORECASE)
+        emphasized_words = set()
+        for match in emphasis_pattern.finditer(ssml_text):
+            for w in match.group(1).split():
+                clean = re.sub(r'[^\w]', '', w).lower()
+                if clean:
+                    emphasized_words.add(clean)
+                    
+        # Clean of all XML tags
+        clean_text = re.sub(r'<[^>]+>', '', ssml_text)
+        words_info = []
+        for w in clean_text.split():
+            clean = re.sub(r'[^\w]', '', w).lower()
+            is_emp = clean in emphasized_words
+            words_info.append({"word": w, "is_emphasized": is_emp})
+        return words_info
 
     def _create_burn_transition_clip(self, bg_source: Any, duration: float = 0.8) -> 'VideoClip':
         """Returns a VideoClip that applies a procedural burning-paper transition effect."""
@@ -2532,20 +2684,28 @@ class VideoEngine:
             bg_arr_float = bg_arr.astype(np.float32)
 
             # Flame glow gradient at burn edge
-            flame = np.zeros((1920, 1080, 3), dtype=np.float32)
+            xx, yy = np.meshgrid(np.arange(1080, dtype=np.float32), np.arange(1920, dtype=np.float32))
+            x_scaled = (xx * 0.02 * 157).astype(np.int32)
+            y_scaled = (yy * 0.02 * 311).astype(np.int32)
+            
+            n = x_scaled ^ y_scaled ^ seed
+            n = (n << 13) ^ n
+            term = n * (n * n * 60493 + 19990303) + 1376312589
+            noise_v = (term & 0x7fffffff).astype(np.float32) / 0x7fffffff
+            
+            nx = xx / 1080
+            displaced = nx + (noise_v - 0.5) * 0.3
             edge_pos = 1.0 - pow(progress, 0.7)
-            for y in range(1920):
-                for x in range(1080):
-                    nx = x / 1080
-                    noise_v = self._value_noise_2d(x * 0.02, y * 0.02, seed)
-                    displaced = nx + (noise_v - 0.5) * 0.3
-                    dist = displaced - edge_pos
-                    if 0.0 <= dist < 0.08:
-                        intensity = 1.0 - dist / 0.08
-                        # Color ramp: yellow → orange → dark
-                        flame[y, x, 0] = 255 * intensity
-                        flame[y, x, 1] = int(200 * intensity * (1.0 - dist * 3))
-                        flame[y, x, 2] = int(50 * intensity * (1.0 - dist * 6))
+            dist = displaced - edge_pos
+            
+            flame_mask = (dist >= 0.0) & (dist < 0.08)
+            intensity = np.zeros_like(dist)
+            intensity[flame_mask] = 1.0 - dist[flame_mask] / 0.08
+            
+            flame = np.zeros((1920, 1080, 3), dtype=np.float32)
+            flame[:, :, 0] = 255 * intensity
+            flame[:, :, 1] = 200 * intensity * np.clip(1.0 - dist * 3.0, 0.0, 1.0)
+            flame[:, :, 2] = 50 * intensity * np.clip(1.0 - dist * 6.0, 0.0, 1.0)
 
             # Composite
             mask_3ch = np.stack([burn_mask] * 3, axis=-1)
@@ -2668,7 +2828,7 @@ class VideoEngine:
             
         return clip
 
-    def _create_starting_bumper(self, audio_duration: float, video_type: str, style_dict: dict = None) -> 'VideoClip':
+    def _create_starting_bumper(self, audio_duration: float, video_type: str, style_dict: dict = None, text: str = None) -> 'VideoClip':
         """
         Creates the starting bumper video clip.
         Uses a blueprint video from assets/video_blueprints/starting/ (or static fallback),
@@ -2681,11 +2841,16 @@ class VideoEngine:
         except ImportError:
             from moviepy import VideoClip, VideoFileClip
 
-        # Determine text based on video_type
-        if video_type == "myth":
-            text = "Now, bringing you the strangest MYTH that will shock you."
-        else:
-            text = "Now, bringing you the most BIZARRE TRUTH that will shock you."
+        # Determine text based on video_type if not explicitly provided
+        if text is None:
+            if video_type == "myth":
+                text = "Now, bringing you the strangest MYTH that will shock you."
+            elif video_type == "bizarre":
+                text = "Now, bringing you the most BIZARRE TRUTH that will shock you."
+            elif video_type == "dynamic":
+                text = "Now, bringing you the declassified truth."
+            else:
+                text = "Now, bringing you the most BIZARRE TRUTH that will shock you."
 
         total_duration = audio_duration
 
@@ -2781,7 +2946,7 @@ class VideoEngine:
             clip.close = custom_close
         return clip
 
-    def _create_ending_scene(self, audio_duration: float, style_dict: dict = None) -> 'VideoClip':
+    def _create_ending_scene(self, audio_duration: float, style_dict: dict = None, text: str = None) -> 'VideoClip':
         """
         Creates the ending bumper (Class Dismissed) video clip.
         Uses a blueprint video from assets/video_blueprints/ending/ (or static fallback),
@@ -2795,7 +2960,8 @@ class VideoEngine:
         except ImportError:
             from moviepy import VideoClip, VideoFileClip
 
-        text = "Like, share, subscribe, if you seriously want to know more about myths and bizarre truths. CLASS DISMISSED."
+        if text is None:
+            text = "Like, share, subscribe, if you seriously want to know more about myths and bizarre truths. CLASS DISMISSED."
         total_duration = audio_duration
 
         bg_video = None
@@ -2860,10 +3026,10 @@ class VideoEngine:
                 self._render_highlighted_subtitles(draw, bumper_font, word_timings, t, style_dict, y_pos=800, font_px_height=72)
                 fused_arr = np.array(fused_img)
 
-            # CRT Power-Off collapse transition in the last 0.8 seconds of the video
-            if t >= total_duration - 0.8:
-                dt = t - (total_duration - 0.8)
-                norm = min(1.0, dt / 0.8)
+            # CRT Power-Off collapse transition in the last 0.4 seconds of the video
+            if t >= total_duration - 0.4:
+                dt = t - (total_duration - 0.4)
+                norm = min(1.0, dt / 0.4)
                 
                 # Canvas for rendering black background and collapse highlights
                 black_frame = Image.new("RGB", (w, h), (10, 15, 30)) # matching blueprint background tint
@@ -2949,7 +3115,9 @@ class VideoEngine:
         output_name: str,
         category: str,
         style: str = "blueprint",
-        video_type: str = "dynamic"
+        video_type: str = "dynamic",
+        starting_text: str = None,
+        ending_text: str = None
     ) -> str:
         """
         Compiles a dynamic N-scene video.
@@ -2977,6 +3145,7 @@ class VideoEngine:
         self._ensure_sfx_exist()
 
         # Resource tracking
+        tmp_files = []
         audio_clips = []
         bg_videos = []
         bg_music_clip = None
@@ -3025,7 +3194,8 @@ class VideoEngine:
             starting_clip = self._create_starting_bumper(
                 audio_duration=audio_durations[0],
                 video_type=video_type,
-                style_dict=st
+                style_dict=st,
+                text=starting_text
             )
             starting_audio = audio_clips[0]
             starting_clip = starting_clip.with_audio(starting_audio)
@@ -3060,7 +3230,8 @@ class VideoEngine:
                     scene_title=scene_titles[i],
                     style_dict=st,
                     audio_clip=audio_clips[audio_idx],
-                    mid_roll_word_indices=None
+                    mid_roll_word_indices=None,
+                    is_last_scene=(i == scene_count - 1)
                 )
                 s_audio = audio_clips[audio_idx].set_start(delay_offset)
                 s_clip = s_clip.with_audio(s_audio)
@@ -3090,7 +3261,8 @@ class VideoEngine:
             # ---- Last Clip: Ending Bumper ----
             ending_clip = self._create_ending_scene(
                 audio_duration=audio_durations[-1],
-                style_dict=st
+                style_dict=st,
+                text=ending_text
             )
             ending_audio = audio_clips[-1]
             ending_clip = ending_clip.with_audio(ending_audio)
@@ -3291,7 +3463,8 @@ class VideoEngine:
                     print(f"[VideoEngine] WARNING: Failed to mix low-frequency hum: {hum_err}")
 
             mixed_audio = CompositeAudioClip(audio_clips_to_mix)
-            video_clip = video_clip.with_audio(mixed_audio)
+            video_clip, tmp_files = self._normalize_and_attach_audio(video_clip, mixed_audio, output_name)
+            video_clip = self._add_global_progress_bar(video_clip, st)
 
             codec = "h264_nvenc" if self.has_cuda else "libx264"
             threads = os.cpu_count() or 4
@@ -3315,6 +3488,13 @@ class VideoEngine:
                     video_clip.close()
                 except:
                     pass
+            # Clean up temp files
+            for f_path in tmp_files:
+                if os.path.exists(f_path):
+                    try:
+                        os.remove(f_path)
+                    except:
+                        pass
             for c in audio_clips:
                 if c:
                     try:
@@ -3351,7 +3531,7 @@ class VideoEngine:
             import gc
             gc.collect()
 
-    def _compile_scene_based_video(self, image_paths: List[str], audio_paths: List[str], scene_texts: List[str], scene_labels: List[str], scene_titles: List[str], output_name: str, category: str, style: str, is_bizarre: bool, video_type: str = "myth", mid_roll_word_indices: Optional[set] = None) -> str:
+    def _compile_scene_based_video(self, image_paths: List[str], audio_paths: List[str], scene_texts: List[str], scene_labels: List[str], scene_titles: List[str], output_name: str, category: str, style: str, is_bizarre: bool, video_type: str = "myth", mid_roll_word_indices: Optional[set] = None, starting_text: Optional[str] = None, ending_text: Optional[str] = None) -> str:
         """
         Compiles a video from 5 audio tracks and 7 video clips:
           [starting bumper] → [scene 1] → [transition 1] → [scene 2] → [transition 2] → [scene 3] → [ending bumper]
@@ -3372,6 +3552,7 @@ class VideoEngine:
         self._ensure_sfx_exist()
         
         # Resource tracking
+        tmp_files = []
         audio_clips = []
         bg_video_1 = None
         bg_video_2 = None
@@ -3432,7 +3613,8 @@ class VideoEngine:
                 starting_clip = self._create_starting_bumper(
                     audio_duration=audio_durations[0],
                     video_type=video_type,
-                    style_dict=st
+                    style_dict=st,
+                    text=starting_text
                 )
                 starting_audio = audio_clips[0]
                 starting_clip = starting_clip.with_audio(starting_audio)
@@ -3440,7 +3622,8 @@ class VideoEngine:
                 
                 ending_clip = self._create_ending_scene(
                     audio_duration=audio_durations[-1],
-                    style_dict=st
+                    style_dict=st,
+                    text=ending_text
                 )
                 ending_audio = audio_clips[-1]
                 ending_clip = ending_clip.with_audio(ending_audio)
@@ -3538,7 +3721,8 @@ class VideoEngine:
                     scene_title=scene_titles[i],
                     style_dict=st,
                     audio_clip=content_audio_clips[i],
-                    mid_roll_word_indices=mid_roll_word_indices
+                    mid_roll_word_indices=mid_roll_word_indices,
+                    is_last_scene=(i == n - 1)
                 )
                 
                 # Attach audio (narration starts after delay_offset)
@@ -3757,7 +3941,8 @@ class VideoEngine:
                     print(f"[VideoEngine] WARNING: Failed to mix low-frequency hum: {hum_err}")
 
             mixed_audio = CompositeAudioClip(audio_clips_to_mix)
-            video_clip = video_clip.with_audio(mixed_audio)
+            video_clip, tmp_files = self._normalize_and_attach_audio(video_clip, mixed_audio, output_name)
+            video_clip = self._add_global_progress_bar(video_clip, st)
             
             codec = "h264_nvenc" if self.has_cuda else "libx264"
             threads = os.cpu_count() or 4
@@ -3781,6 +3966,13 @@ class VideoEngine:
                     video_clip.close()
                 except:
                     pass
+            # Clean up temp files
+            for f_path in tmp_files:
+                if os.path.exists(f_path):
+                    try:
+                        os.remove(f_path)
+                    except:
+                        pass
             for c in audio_clips:
                 if c:
                     try:

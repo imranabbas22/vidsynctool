@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.5.4] - 2026-05-24
+
+### Added
+- **Kinetic Subtitle Styles (SSML Emphasis)**: Enhanced `_render_highlighted_subtitles` to render active emphasized words with a 1.2x scale multiplier (120% scale boost) on the elastic bounce animation, drawing the highlight pill in the myth card outline color with white text. Rendered inactive emphasized words in the preset's highlight background color (e.g. yellow) instead of standard white.
+- **SSML Emphasis Propagation**: Updated `_parse_ssml_script` to extract and return raw SSML segments containing emphasis tags as `s1_ssml`, `s2_ssml`, `s3_ssml`, and updated `compile_short`, `compile_bizarre`, and dynamic video orchestrators to pass these SSML strings into the compilation pipelines.
+- **Loudness Normalization**: Integrated `pydub` to perform target loudness normalization to -14 dBFS (equivalent to YouTube's -14 LUFS standard) on the final compiled audio mix before video rendering, utilizing peak limiting at -1.0 dBFS to prevent clipping and distortion, and ensuring temporary files are safely deleted in `finally:` blocks.
+- **Thumbnail Decoration (No Faces)**: Modified the thumbnail generator to draw premium static vector decorations (a warning exclamation triangle on the Myth side, and a magnifying glass on the Truth side) instead of human/living faces to respect the user's religious beliefs (haram) while driving click-through-rate (CTR).
+
 ## [4.5.3] - 2026-05-23
 
 ### Added

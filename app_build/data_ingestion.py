@@ -70,9 +70,26 @@ class DataIngestion:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     topic TEXT NOT NULL UNIQUE,
                     script_hook TEXT NOT NULL,
+                    style_preset TEXT DEFAULT '',
+                    video_type TEXT DEFAULT '',
+                    transition_type TEXT DEFAULT '',
                     date_uploaded TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
+            # Migrate existing tables: add columns if missing
+            cursor.execute("PRAGMA table_info(audit_history)")
+            existing_cols = {row[1] for row in cursor.fetchall()}
+            for col, definition in [
+                ("style_preset", "TEXT DEFAULT ''"),
+                ("video_type", "TEXT DEFAULT ''"),
+                ("transition_type", "TEXT DEFAULT ''"),
+            ]:
+                if col not in existing_cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE audit_history ADD COLUMN {col} {definition}")
+                        print(f"[Ingestion] Migrated database: added column '{col}'")
+                    except Exception as e:
+                        print(f"[Ingestion] Migration note: could not add column '{col}': {e}")
             conn.commit()
 
     def _normalize_topic_tokens(self, text: str) -> set:
@@ -152,15 +169,26 @@ class DataIngestion:
                     
         return False
 
-    def log_uploaded_topic(self, topic: str, hook: str):
-        """Logs a topic to prevent duplicates. Updates hook text if already logged."""
+    def log_uploaded_topic(self, topic: str, hook: str,
+                            style_preset: str = "", video_type: str = "",
+                            transition_type: str = ""):
+        """
+        Logs a topic to prevent duplicates. Updates hook if already logged.
+        Records A/B test metadata (style preset, video type, transition type)
+        for correlation with analytics data.
+        """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                """INSERT INTO audit_history (topic, script_hook) VALUES (?, ?)
-                   ON CONFLICT(topic) DO UPDATE SET script_hook = excluded.script_hook
+                """INSERT INTO audit_history (topic, script_hook, style_preset, video_type, transition_type)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(topic) DO UPDATE SET
+                       script_hook = excluded.script_hook,
+                       style_preset = COALESCE(NULLIF(excluded.style_preset, ''), style_preset),
+                       video_type = COALESCE(NULLIF(excluded.video_type, ''), video_type),
+                       transition_type = COALESCE(NULLIF(excluded.transition_type, ''), transition_type)
                    WHERE excluded.script_hook != ''""",
-                (topic, hook)
+                (topic, hook, style_preset, video_type, transition_type)
             )
             conn.commit()
 

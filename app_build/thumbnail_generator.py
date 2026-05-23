@@ -281,6 +281,58 @@ class ThumbnailDesigner:
             y2 = cy + int((r + 25) * math.sin(rad))
             draw.line([(x1, y1), (x2, y2)], fill=(255, 255, 255, 35), width=1)
 
+    def _draw_warning_triangle(self, draw, cx, cy, size=130):
+        h = int(size * math.sqrt(3) / 2)
+        pt1 = (cx, cy - h // 2)
+        pt2 = (cx - size // 2, cy + h // 2)
+        pt3 = (cx + size // 2, cy + h // 2)
+        
+        # Outline/glow shadow
+        draw.polygon([pt1, pt2, pt3], fill=(45, 15, 15, 120), outline=(255, 75, 75, 255), width=6)
+        
+        # Draw exclamation point
+        font_size = int(size * 0.5)
+        try:
+            font = ImageFont.truetype(FONT_PATH, font_size)
+        except:
+            font = ImageFont.load_default()
+        
+        mark = "!"
+        mw = draw.textlength(mark, font=font)
+        mh = font_size
+        draw.text((cx - mw // 2, cy - mh // 2 + 5), mark, fill=(255, 255, 255, 255), font=font)
+
+    def _draw_magnifying_glass(self, draw, cx, cy, size=130):
+        r = size // 3
+        # Lens circle
+        draw.ellipse(
+            [(cx - r, cy - r), (cx + r, cy + r)],
+            fill=(20, 30, 50, 100),
+            outline=(0, 242, 254, 255),
+            width=7
+        )
+        # Lens glare / reflection
+        draw.arc(
+            [(cx - r + 8, cy - r + 8), (cx + r - 8, cy + r - 8)],
+            start=200, end=290,
+            fill=(255, 255, 255, 180),
+            width=3
+        )
+        # Handle
+        hx1 = cx + int(r * math.cos(math.radians(45)))
+        hy1 = cy + int(r * math.sin(math.radians(45)))
+        hx2 = cx + int(size * 0.65)
+        hy2 = cy + int(size * 0.65)
+        draw.line([(hx1, hy1), (hx2, hy2)], fill=(120, 120, 120, 255), width=10)
+        draw.line([(hx1, hy1), (hx2, hy2)], fill=(200, 200, 200, 255), width=4)
+
+    def _draw_graphic_decorations(self, draw):
+        """Draws premium static graphics (warning triangle on Myth side, magnifying glass on Truth side)."""
+        # Warning triangle in top-left (Myth) side
+        self._draw_warning_triangle(draw, cx=260, cy=460, size=130)
+        # Magnifying glass in bottom-right (Truth) side
+        self._draw_magnifying_glass(draw, cx=820, cy=1440, size=130)
+
     def _draw_light_glare(self, img):
         cx, cy = self.w // 2, self.h // 2
         glare = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 0))
@@ -376,6 +428,7 @@ class ThumbnailDesigner:
 
         final_draw = ImageDraw.Draw(base)
         self._draw_side_labels(final_draw)
+        self._draw_graphic_decorations(final_draw)
         self._draw_center_title(final_draw, title_text)
         self._draw_stamps(final_draw)
         self._draw_channel_logo(final_draw)

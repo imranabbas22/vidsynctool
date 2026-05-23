@@ -7,6 +7,7 @@ import time
 import argparse
 import random
 import re
+import functools
 from dotenv import load_dotenv
 
 # Load local environment parameters
@@ -22,13 +23,44 @@ from tiktok_uploader import TikTokUploader
 from data_scraper import DataScraper
 
 CTA_ROTATION = [
-    "Subscribe for more declassified truths.",
-    "Follow The Daily Audit. The truth does not declassify itself.",
-    "Hit subscribe. The next audit file is already open.",
-    "Join the audit. New declassified files every day.",
+    "Subscribe. Tomorrow, I expose another lie.",
+    "Subscribe — we expose a new lie EVERY. SINGLE. DAY.",
+    "Join the truth-seekers. New declassified files daily.",
+    "Hit subscribe — or keep believing the lies.",
+    "The truth does not declassify itself. Neither does your sub button.",
 ]
 
 STYLES = ["blueprint", "blueprint", "chalkboard", "classified", "cyberpunk", "retro_vhs", "terminal"]
+
+TRANSITIONS = ["glitch", "burn"]
+
+# ── Retry utility ────────────────────────────────────────────────────────────
+def retry_with_backoff(max_retries=3, base_delay=2.0, backoff_factor=2.0,
+                       retryable_exceptions=(Exception,)):
+    """
+    Decorator that retries a function on failure with exponential backoff.
+    Only retries on the specified exception types (default: all Exceptions).
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exc = None
+            for attempt in range(1, max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except retryable_exceptions as e:
+                    last_exc = e
+                    if attempt < max_retries:
+                        delay = base_delay * (backoff_factor ** (attempt - 1))
+                        print(f"[Retry] {func.__name__} failed (attempt {attempt}/{max_retries}): "
+                              f"{type(e).__name__}: {e}. Retrying in {delay:.1f}s...")
+                        time.sleep(delay)
+                    else:
+                        print(f"[Retry] {func.__name__} failed after {max_retries} attempts. "
+                              f"Giving up: {type(e).__name__}: {e}")
+            raise last_exc
+        return wrapper
+    return decorator
 
 
 def split_myth_ssml(ssml_script, hook_clean, context_clean, fact_clean):
@@ -185,6 +217,10 @@ def run_pipeline():
     video_style = random.choice(STYLES)
     print(f"[Main] Visual Style Selected: {video_style.upper()}")
 
+    # Select a random transition type for A/B tracking
+    transition_type = random.choice(TRANSITIONS)
+    print(f"[Main] Transition Type: {transition_type}")
+
     # Select a random CTA for this run
     cta_text = random.choice(CTA_ROTATION)
     print(f"[Main] CTA Text: '{cta_text}'")
@@ -278,7 +314,7 @@ def run_pipeline():
                 print(f"[Main] Myth Starting Bumper: '{starting_text}'")
 
                 # --- Ending bumper TTS ---
-                ending_text = "Like, share, subscribe, if you seriously want to know more about myths and bizarre truths. CLASS DISMISSED."
+                ending_text = f"{cta_text} CLASS DISMISSED."
                 ending_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{ending_text}</prosody>"
                 print(f"[Main] Myth Ending Bumper: '{ending_text}'")
 
@@ -345,6 +381,8 @@ def run_pipeline():
                 video_eng = VideoEngine()
                 video_name = f"{clean_title}_{timestamp}"
                 script_payload["cta"] = cta_text
+                script_payload["starting_text"] = starting_text
+                script_payload["ending_text"] = ending_text
                 video_path = video_eng.compile_short(image_myth_path, image_truth_path, audio_paths, script_payload, video_name, category, style=video_style, video_type="myth")
                 print(f"[Main] Video assembled and saved successfully: {video_path}")
                 # Generate thumbnail using actual video images
@@ -435,7 +473,7 @@ def run_pipeline():
                 print(f"[Main] Bizarre Starting Bumper: '{starting_text}'")
 
                 # --- Ending bumper TTS ---
-                ending_text = "Like, share, subscribe, if you seriously want to know more about myths and bizarre truths. CLASS DISMISSED."
+                ending_text = f"{cta_text} CLASS DISMISSED."
                 ending_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{ending_text}</prosody>"
                 print(f"[Main] Bizarre Ending Bumper: '{ending_text}'")
 
@@ -479,6 +517,8 @@ def run_pipeline():
                 "why_bizarre": why_bizarre,
                 "closing_statement": closing_statement,
                 "cta": cta_text,
+                "starting_text": starting_text,
+                "ending_text": ending_text,
             }
 
             # 7. Compile Anomaly Video with multiple scene images
@@ -552,7 +592,7 @@ def run_pipeline():
                 starting_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{starting_text}</prosody>"
                 print(f"[Main] Dynamic Starting Bumper: '{starting_text}'")
 
-                ending_text = "Like, share, subscribe, if you seriously want to know more. CLASS DISMISSED."
+                ending_text = f"{cta_text} CLASS DISMISSED."
                 ending_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{ending_text}</prosody>"
                 print(f"[Main] Dynamic Ending Bumper: '{ending_text}'")
 
@@ -585,13 +625,15 @@ def run_pipeline():
                 video_path = video_eng.compile_dynamic_video(
                     image_paths=image_paths,
                     audio_paths=audio_paths,
-                    scene_texts=[s.text for s in script_payload.scenes],
+                    scene_texts=[s.ssml for s in script_payload.scenes],
                     scene_titles=[s.title for s in script_payload.scenes],
                     scene_labels=[f"[ SCENE {i+1} ]" for i in range(len(script_payload.scenes))],
                     output_name=video_name,
                     category=category,
                     style=video_style,
-                    video_type="dynamic"
+                    video_type="dynamic",
+                    starting_text=starting_text,
+                    ending_text=ending_text
                 )
                 print(f"[Main] Dynamic video assembled successfully: {video_path}")
                 # Generate thumbnail
@@ -611,31 +653,38 @@ def run_pipeline():
         # =========================================================================
         # UPLOAD AND FINALIZATION SUBSYSTEM
         # =========================================================================
-        # Upload to YouTube via API
+
+        # Build common upload fields
+        tags = meta.get("tags", ["education", "shorts"])
+        hashtags_str = " ".join([f"#{t.strip().replace(' ', '')}" for t in tags if t.strip()])
+        base_desc = meta.get("description", f"Educating about {topic}.")
+        yt_desc = f"{base_desc}\n\n#TheDailyAudit #Shorts {hashtags_str}"
+        fb_desc = f"{base_desc}\n\n#TheDailyAudit #Reels {hashtags_str}"
+        tt_caption = f"{base_desc}\n\n#TheDailyAudit #Shorts #fyp {hashtags_str}"
+
+        # Upload to YouTube via API with retry
         yt_upload_success = False
         yt_video_id = None
         try:
             uploader = YouTubeUploader()
-            tags = meta.get("tags", ["education", "shorts"])
-            
-            # Format tags as hashtags and append to the description
-            hashtags_str = " ".join([f"#{t.strip().replace(' ', '')}" for t in tags if t.strip()])
-            base_desc = meta.get("description", f"Educating about {topic}.")
-            desc = f"{base_desc}\n\n#TheDailyAudit #Shorts {hashtags_str}"
-            
             print(f"[Main] Connecting to YouTube Data API for Short deployment with tags: {tags}")
-            yt_upload_success, yt_video_id = uploader.upload_short(video_path, title, desc, tags)
+            @retry_with_backoff(max_retries=3, base_delay=2.0)
+            def _yt_upload():
+                return uploader.upload_short(video_path, title, yt_desc, tags)
+            yt_upload_success, yt_video_id = _yt_upload()
         except Exception as e:
             print(f"[Main] ERROR: YouTube upload subsystem failed: {e}")
 
-        # Upload to Facebook Reels via API
+        # Upload to Facebook Reels via API with retry
         fb_upload_success = False
         fb_video_id = None
         try:
             fb_uploader = FacebookUploader()
-            fb_desc = f"{base_desc}\n\n#TheDailyAudit #Reels {hashtags_str}"
             print("[Main] Connecting to Meta Graph API for Facebook Reels deployment...")
-            fb_upload_success, fb_video_id = fb_uploader.upload_reel(video_path, fb_desc)
+            @retry_with_backoff(max_retries=3, base_delay=2.0)
+            def _fb_upload():
+                return fb_uploader.upload_reel(video_path, fb_desc)
+            fb_upload_success, fb_video_id = _fb_upload()
         except Exception as e:
             print(f"[Main] ERROR: Facebook upload subsystem failed: {e}")
 
@@ -645,19 +694,27 @@ def run_pipeline():
         if not getattr(args, 'skip_tiktok', False):
             try:
                 tt_uploader = TikTokUploader(headless=True)
-                tt_caption = f"{base_desc}\n\n#TheDailyAudit #Shorts #fyp {hashtags_str}"
                 print("[Main] Uploading to TikTok via Playwright (AIGC label enabled)...")
-                tt_upload_success, tt_video_id = tt_uploader.upload(video_path, tt_caption)
+                @retry_with_backoff(max_retries=2, base_delay=3.0)
+                def _tt_upload():
+                    return tt_uploader.upload(video_path, tt_caption)
+                tt_upload_success, tt_video_id = _tt_upload()
             except Exception as e:
                 print(f"[Main] ERROR: TikTok upload subsystem failed: {e}")
         else:
             print("[Main] TikTok upload skipped (--skip-tiktok flag)")
 
-        # Complete transaction: Log history if successfully uploaded (or successfully mocked)
+        # Complete transaction: Log history with A/B metadata if successfully uploaded
         if yt_upload_success or fb_upload_success or tt_upload_success:
             try:
-                ingestion.log_uploaded_topic(topic, hook_text)
+                ingestion.log_uploaded_topic(
+                    topic, hook_text,
+                    style_preset=video_style,
+                    video_type=video_type,
+                    transition_type=transition_type,
+                )
                 print(f"[Main] SUCCESS: Topic '{topic}' permanently retired and logged in database.")
+                print(f"[Main] A/B Data: style={video_style}, type={video_type}, transition={transition_type}")
             except Exception as e:
                 print(f"[Main] WARNING: Failed to record upload event in database: {e}")
         else:

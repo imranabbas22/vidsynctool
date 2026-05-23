@@ -21,7 +21,7 @@ class ShortScriptPayload(BaseModel):
     ssml_script: str = Field(
         description="The complete inner SSML script for a strict authoritative teacher delivering cold hard facts. "
                     "Rules: "
-                    "- Each scene (hook, explanation, truth) must be 8 to 12 words total "
+                    "- Scene 1 and Scene 3 must be 8 to 12 words total. Scene 2 (explanation/context) must be 12 to 18 words total. "
                     "- Use <break time=\"700ms\"/> between scene 1 and scene 2 "
                     "- Use <break time=\"1200ms\"/> between scene 2 and scene 3 "
                     "- Capitalize words needing emphasis "
@@ -30,7 +30,7 @@ class ShortScriptPayload(BaseModel):
                     "- No markdown, no explanation, just the script. "
                     "Structure: "
                     "1. Scene 1: Hook/claim (the myth or bizarre statement) — 8–12 words "
-                    "2. Scene 2: Explanation/context (why people believe it) — 8–12 words "
+                    "2. Scene 2: Explanation/context (why people believe it) — 12–18 words "
                     "3. Scene 3: Truth/reveal (the debunk) — 8–12 words"
     )
     myth_visual_prompt: str = Field(description="Visual prompt describing the misconception. MUST include: 'Style of a declassified government document, dark blue and white blueprint, highly detailed.'")
@@ -49,7 +49,7 @@ class ShortBizarrePayload(BaseModel):
     ssml_script: str = Field(
         description="The complete inner SSML script for a strict authoritative teacher delivering cold hard facts. "
                     "Rules: "
-                    "- Each scene (hook, explanation, truth) must be 8 to 12 words total "
+                    "- Scene 1 and Scene 3 must be 8 to 12 words total. Scene 2 (explanation/context) must be 12 to 18 words total. "
                     "- Use <break time=\"700ms\"/> between scene 1 and scene 2 "
                     "- Use <break time=\"1200ms\"/> between scene 2 and scene 3 "
                     "- Capitalize words needing emphasis "
@@ -58,7 +58,7 @@ class ShortBizarrePayload(BaseModel):
                     "- No markdown, no explanation, just the script. "
                     "Structure: "
                     "1. Scene 1: Hook/claim (the bizarre statement) — 8–12 words "
-                    "2. Scene 2: Explanation/context (why it is bizarre) — 8–12 words "
+                    "2. Scene 2: Explanation/context (why it is bizarre) — 12–18 words "
                     "3. Scene 3: Truth/reveal (the shocking truth) — 8–12 words"
     )
     illustration_query: str = Field(description="Primary keyword query for a Wikipedia/Goolge photo (e.g., 'Coelacanth fish'). Used for thumbnail and scene 1.")
@@ -220,102 +220,98 @@ class LLMOrchestrator:
             t = re.sub(r'<[^>]+>', '', t).strip()
             return re.sub(r'\s+', ' ', t)
 
+        def clean_ssml_segment(t: str) -> str:
+            # keep only <emphasis> tags, strip other XML tags
+            t = re.sub(r'<(?!(?:/emphasis|emphasis)\b)[^>]+>', '', t).strip()
+            return re.sub(r'\s+', ' ', t)
+
         if not matches:
             # Fallback: split into 3 sentences
-            sentences = [clean_text(s) for s in re.split(r'(?<=[.!?])\s+', clean_ssml) if s.strip()]
-            while len(sentences) < 3:
-                sentences.append("")
-            if not is_bizarre:
-                return {
-                    "hook": sentences[0],
-                    "context": sentences[1],
-                    "fact": sentences[2],
-                }
-            else:
-                return {
-                    "hook": sentences[0],
-                    "why_bizarre": sentences[1],
-                    "closing_statement": sentences[2],
-                }
-
-        # Extract all text segments
-        segments = []
-        prev_end = 0
-        for m in matches:
-            segments.append(clean_ssml[prev_end:m.start()])
-            prev_end = m.end()
-        segments.append(clean_ssml[prev_end:])
-
-        # Find index of the 1200ms break (separates scene 2 from scene 3)
-        idx_1200 = -1
-        for i, m in enumerate(matches):
-            if "1200" in m.group(1):
-                idx_1200 = i
-                break
-
-        # Find index of the 700ms break (separates scene 1 from scene 2)
-        idx_700 = -1
-        for i, m in enumerate(matches):
-            if "700" in m.group(1):
-                idx_700 = i
-                break
-
-        if idx_1200 == -1:
-            idx_1200 = min(1, len(matches) - 1) if matches else 0
-
-        # Determine which break comes first
-        if idx_700 != -1 and idx_1200 != -1:
-            first_break = min(idx_700, idx_1200)
-            second_break = max(idx_700, idx_1200)
-
-            if first_break == idx_700:
-                # 700ms is first, 1200ms is second
-                s1_text = clean_text(segments[0])
-                context_segs = [segments[i] for i in range(1, second_break + 1)]
-                if len(segments) > second_break + 1:
-                    s2_text = clean_text(" ".join(segments[1:second_break + 1]))
-                    s3_text = clean_text(" ".join(segments[second_break + 1:]))
-                else:
-                    s2_text = clean_text(" ".join(segments[1:second_break + 1]))
-                    s3_text = ""
-            else:
-                # 1200ms is first, 700ms is second (unusual but handle it)
-                s1_text = clean_text(segments[0])
-                if len(segments) > first_break + 1:
-                    s2_text = clean_text(" ".join(segments[1:first_break + 1]))
-                    s3_text = clean_text(" ".join(segments[first_break + 1:]))
-                else:
-                    s2_text = clean_text(" ".join(segments[1:first_break + 1]))
-                    s3_text = ""
-        elif idx_1200 != -1:
-            # Only 1200ms break found: 2 segments
-            s1_text = clean_text(segments[0])
-            s2_and_rest = clean_text(" ".join(segments[1:])) if len(segments) > 1 else ""
-            s3_text = ""
-            # Try to split s2_and_rest into two roughly
-            s2_parts = s2_and_rest.split(". ")
-            if len(s2_parts) >= 2:
-                s2_text = s2_parts[0] + "."
-                s3_text = ". ".join(s2_parts[1:])
-            else:
-                s2_text = s2_and_rest
-                s3_text = ""
+            sentences_raw = [s.strip() for s in re.split(r'(?<=[.!?])\s+', clean_ssml) if s.strip()]
+            while len(sentences_raw) < 3:
+                sentences_raw.append("")
+            s1_raw, s2_raw, s3_raw = sentences_raw[0], sentences_raw[1], sentences_raw[2]
         else:
-            s1_text = clean_text(segments[0]) if segments else ""
-            s2_text = clean_text(" ".join(segments[1:])) if len(segments) > 1 else ""
-            s3_text = ""
+            # Extract all text segments
+            segments = []
+            prev_end = 0
+            for m in matches:
+                segments.append(clean_ssml[prev_end:m.start()])
+                prev_end = m.end()
+            segments.append(clean_ssml[prev_end:])
+
+            # Find index of the 1200ms break (separates scene 2 from scene 3)
+            idx_1200 = -1
+            for i, m in enumerate(matches):
+                if "1200" in m.group(1):
+                    idx_1200 = i
+                    break
+
+            # Find index of the 700ms break (separates scene 1 from scene 2)
+            idx_700 = -1
+            for i, m in enumerate(matches):
+                if "700" in m.group(1):
+                    idx_700 = i
+                    break
+
+            if idx_1200 == -1:
+                idx_1200 = min(1, len(matches) - 1) if matches else 0
+
+            # Determine which break comes first
+            if idx_700 != -1 and idx_1200 != -1:
+                first_break = min(idx_700, idx_1200)
+                second_break = max(idx_700, idx_1200)
+
+                if first_break == idx_700:
+                    # 700ms is first, 1200ms is second
+                    s1_raw = segments[0]
+                    s2_raw = " ".join(segments[1:second_break + 1])
+                    s3_raw = " ".join(segments[second_break + 1:]) if len(segments) > second_break + 1 else ""
+                else:
+                    # 1200ms is first, 700ms is second (unusual but handle it)
+                    s1_raw = segments[0]
+                    s2_raw = " ".join(segments[1:first_break + 1])
+                    s3_raw = " ".join(segments[first_break + 1:]) if len(segments) > first_break + 1 else ""
+            elif idx_1200 != -1:
+                # Only 1200ms break found: 2 segments
+                s1_raw = segments[0]
+                s2_and_rest = " ".join(segments[1:]) if len(segments) > 1 else ""
+                # Try to split s2_and_rest into two roughly
+                s2_parts = s2_and_rest.split(". ")
+                if len(s2_parts) >= 2:
+                    s2_raw = s2_parts[0] + "."
+                    s3_raw = ". ".join(s2_parts[1:])
+                else:
+                    s2_raw = s2_and_rest
+                    s3_raw = ""
+            else:
+                s1_raw = segments[0] if segments else ""
+                s2_raw = " ".join(segments[1:]) if len(segments) > 1 else ""
+                s3_raw = ""
 
         if not is_bizarre:
             return {
-                "hook": s1_text,
-                "context": s2_text,
-                "fact": s3_text,
+                "hook": clean_text(s1_raw),
+                "context": clean_text(s2_raw),
+                "fact": clean_text(s3_raw),
+                "hook_ssml": clean_ssml_segment(s1_raw),
+                "context_ssml": clean_ssml_segment(s2_raw),
+                "fact_ssml": clean_ssml_segment(s3_raw),
+                "s1_ssml": clean_ssml_segment(s1_raw),
+                "s2_ssml": clean_ssml_segment(s2_raw),
+                "s3_ssml": clean_ssml_segment(s3_raw),
             }
         else:
             return {
-                "hook": s1_text,
-                "why_bizarre": s2_text,
-                "closing_statement": s3_text,
+                "hook": clean_text(s1_raw),
+                "why_bizarre": clean_text(s2_raw),
+                "closing_statement": clean_text(s3_raw),
+                "hook_ssml": clean_ssml_segment(s1_raw),
+                "why_bizarre_ssml": clean_ssml_segment(s2_raw),
+                "closing_statement_ssml": clean_ssml_segment(s3_raw),
+                "s1_ssml": clean_ssml_segment(s1_raw),
+                "s2_ssml": clean_ssml_segment(s2_raw),
+                "s3_ssml": clean_ssml_segment(s3_raw),
             }
 
     def generate_script(self, topic: str, category: str, myth_desc: str) -> Dict[str, Any]:
@@ -328,7 +324,7 @@ class LLMOrchestrator:
             "Your tone is dramatic, investigative, and stern, using evocative, high-vocabulary forensic whistleblower language.\n"
             "Start hooks strictly using whistleblower, declassified document, or whistleblower file references (e.g., 'The file they tried to bury...', 'Declassified file 942 reveals...').\n"
             "Make the debunk genuinely surprising — the audience should feel foolish for having believed the myth.\n"
-            "Each scene must be 8 to 12 words. No sign-off or 'Class dismissed' in the script.\n"
+            "Scene 1 and Scene 3 must be 8 to 12 words. Scene 2 must be 12 to 18 words. No sign-off or 'Class dismissed' in the script.\n"
             "Ensure the visual prompts are highly descriptive, specific, and specify raw concrete details for Wikipedia/Commons image matching.\n"
             "You must generate the complete inner SSML script conforming to the teacher prompt rules, and also supply visual prompts and youtube metadata.\n"
             "Optionally include a 3-5 word mid-roll retention hook in scene 2 if it feels natural. "
@@ -396,6 +392,7 @@ class LLMOrchestrator:
             "Your tone is dramatic, investigative, and stern, using evocative, high-vocabulary forensic whistleblower language.\n"
             "Start hooks strictly using whistleblower, declassified document, or whistleblower file references (e.g., 'The file they tried to bury...', 'Declassified file 942 reveals...').\n"
             "Make the bizarre twist genuinely surprising.\n"
+            "Scene 1 and Scene 3 must be 8 to 12 words. Scene 2 must be 12 to 18 words. No sign-off or 'Class dismissed' in the script.\n"
             "Ensure that image/scene search queries are highly specific, featuring direct scientific/historical terminology rather than broad words.\n"
             "You must generate the complete inner SSML script conforming to the teacher prompt rules, and also supply scene queries and youtube metadata.\n"
             "Optionally include a 3-5 word mid-roll retention hook in scene 2 if it feels natural. "

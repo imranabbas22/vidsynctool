@@ -19,10 +19,11 @@ from video_engine import VideoEngine, STYLE_PRESETS
 from data_scraper import DataScraper
 
 CTA_ROTATION = [
-    "Subscribe for more declassified truths.",
-    "Follow The Daily Audit. The truth does not declassify itself.",
-    "Hit subscribe. The next audit file is already open.",
-    "Join the audit. New declassified files every day.",
+    "Subscribe. Tomorrow, I expose another lie.",
+    "Subscribe — we expose a new lie EVERY. SINGLE. DAY.",
+    "Join the truth-seekers. New declassified files daily.",
+    "Hit subscribe — or keep believing the lies.",
+    "The truth does not declassify itself. Neither does your sub button.",
 ]
 
 STYLES = ["blueprint", "blueprint", "chalkboard", "classified", "cyberpunk", "retro_vhs", "terminal"]
@@ -269,7 +270,7 @@ def run_pipeline():
                 print(f"[Local] Myth Starting Bumper: '{starting_text}'")
 
                 # --- Ending bumper TTS ---
-                ending_text = "Like, share, subscribe, if you seriously want to know more about myths and bizarre truths. CLASS DISMISSED."
+                ending_text = f"{cta_text} CLASS DISMISSED."
                 ending_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{ending_text}</prosody>"
                 print(f"[Local] Myth Ending Bumper: '{ending_text}'")
 
@@ -336,6 +337,8 @@ def run_pipeline():
                 video_eng = VideoEngine()
                 video_name = f"{clean_title}_{timestamp}"
                 script_payload["cta"] = cta_text
+                script_payload["starting_text"] = starting_text
+                script_payload["ending_text"] = ending_text
                 video_path = video_eng.compile_short(image_myth_path, image_truth_path, audio_paths, script_payload, video_name, category, style=video_style, video_type="myth")
                 print(f"[Local] Video assembled and saved successfully: {video_path}")
                 # Generate thumbnail using actual video images
@@ -425,7 +428,7 @@ def run_pipeline():
                 print(f"[Local] Bizarre Starting Bumper: '{starting_text}'")
 
                 # --- Ending bumper TTS ---
-                ending_text = "Like, share, subscribe, if you seriously want to know more about myths and bizarre truths. CLASS DISMISSED."
+                ending_text = f"{cta_text} CLASS DISMISSED."
                 ending_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{ending_text}</prosody>"
                 print(f"[Local] Bizarre Ending Bumper: '{ending_text}'")
 
@@ -469,6 +472,8 @@ def run_pipeline():
                 "why_bizarre": why_bizarre,
                 "closing_statement": closing_statement,
                 "cta": cta_text,
+                "starting_text": starting_text,
+                "ending_text": ending_text,
             }
 
             # 7. Compile Anomaly Video with multiple scene images
