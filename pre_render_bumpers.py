@@ -61,8 +61,8 @@ def main():
         ("BIZARRE_03.mp4", "Now, with another bizarre truth you did not know.", "bizarre", "Crystals_growing", starting_out_dir),
 
         # --- Universal Ending Bumpers ---
-        ("CLASS_DISMISSED_01.mp4", "Like, share, and subscribe for more similar myth and bizarre content. CLASS DISMISSED.", "ending", "Chalk_writing_CLASS_DISMISSED", ending_out_dir),
-        ("CLASS_DISMISSED_02.mp4", "Like, share, and subscribe for more similar myth and bizarre content. CLASS DISMISSED.", "ending", "Empty_chair_in_spotlight", ending_out_dir),
+        ("CLASS_DISMISSED_01.mp4", "Subscribe — we expose a new lie EVERY. SINGLE. DAY. CLASS DISMISSED.", "ending", "Chalk_writing_CLASS_DISMISSED", ending_out_dir),
+        ("CLASS_DISMISSED_02.mp4", "Subscribe. Tomorrow, I expose another lie. CLASS DISMISSED.", "ending", "Empty_chair_in_spotlight", ending_out_dir),
     ]
 
     for filename, text, b_type, bg_sub, out_dir in bumpers:

@@ -268,8 +268,11 @@ class VideoEngine:
         if not os.path.exists(blueprint_dir):
             return None
             
-        files = os.listdir(blueprint_dir)
-        mp4_files = [f for f in files if f.endswith(".mp4")]
+        mp4_files = []
+        for root, dirs, files in os.walk(blueprint_dir):
+            for f in files:
+                if f.endswith(".mp4"):
+                    mp4_files.append(os.path.join(root, f))
         if not mp4_files:
             return None
             
@@ -329,6 +332,37 @@ class VideoEngine:
             "debunk": "stamp_debunks",
             "fabric": "fabric_grid",
             "grid": "fabric_grid",
+            "space": "nebula_drift",
+            "spiral": "nebula_drift",
+            "nebula": "nebula_drift",
+            "galaxy": "nebula_drift",
+            "saturn": "saturn_ring",
+            "orbit": "saturn_ring",
+            "planet": "saturn_ring",
+            "gravity": "gravitational_lens",
+            "evolution": "evolution_tree",
+            "ancestor": "evolution_tree",
+            "darwin": "evolution_tree",
+            "dinosaur": "t_rex_skeleton",
+            "skeleton": "t_rex_skeleton",
+            "fossil": "t_rex_skeleton",
+            "bone": "t_rex_skeleton",
+            "virus": "virus_capsid",
+            "bacteria": "bacteria_colony",
+            "bacterial": "bacteria_colony",
+            "antibiotic": "bacteria_colony",
+            "gear": "brass_gears",
+            "machine": "brass_gears",
+            "mechanical": "brass_gears",
+            "engine": "steam_piston",
+            "globe": "globe_grid",
+            "earth": "globe_grid",
+            "crust": "crystal_cave",
+            "geology": "crystal_cave",
+            "scales": "scales_justice",
+            "justice": "scales_justice",
+            "typewriter": "old_typewriter",
+            "compass": "ancient_compass",
             "candle": "candle_flame",
             "flame": "candle_flame",
             "crack": "surface_cracking",
@@ -343,13 +377,13 @@ class VideoEngine:
                 
         if matched_pattern:
             for f in mp4_files:
-                if matched_pattern.lower() in f.lower():
-                    return os.path.join(blueprint_dir, f)
+                if matched_pattern.lower() in os.path.basename(f).lower():
+                    return f
                     
         # Fallback to Golden_dust_particles_in_light
         for f in mp4_files:
-            if "particles_in_light" in f.lower():
-                return os.path.join(blueprint_dir, f)
+            if "particles_in_light" in os.path.basename(f).lower():
+                return f
                 
         # Absolute fallback
         return os.path.join(blueprint_dir, mp4_files[0])
@@ -2491,7 +2525,7 @@ class VideoEngine:
                     fused_arr = np.array(fused_img)
 
             # Pre-transition cue visual glitch: cued at last 0.15s of the scene
-            if scene_idx < 2 and total_duration - 0.15 <= t <= total_duration:
+            if not is_last_scene and total_duration - 0.15 <= t <= total_duration:
                 y_start = random.randint(0, 1919)
                 y_end = min(1920, y_start + random.randint(15, 60))
                 shift = random.randint(-15, 15)
@@ -2950,7 +2984,7 @@ class VideoEngine:
         """
         Creates the ending bumper (Class Dismissed) video clip.
         Uses a blueprint video from assets/video_blueprints/ending/ (or static fallback),
-        renders large bold text: "Like, Share, Subscribe\nif you seriously want to know more about myths and bizarre truths. CLASS DISMISSED."
+        renders large bold text: "Subscribe — we expose a new lie EVERY. SINGLE. DAY. CLASS DISMISSED."
         with word-level highlighted subtitles.
         """
         if style_dict is None:
@@ -2961,7 +2995,7 @@ class VideoEngine:
             from moviepy import VideoClip, VideoFileClip
 
         if text is None:
-            text = "Like, share, subscribe, if you seriously want to know more about myths and bizarre truths. CLASS DISMISSED."
+            text = "Subscribe — we expose a new lie EVERY. SINGLE. DAY. CLASS DISMISSED."
         total_duration = audio_duration
 
         bg_video = None
@@ -3026,10 +3060,10 @@ class VideoEngine:
                 self._render_highlighted_subtitles(draw, bumper_font, word_timings, t, style_dict, y_pos=800, font_px_height=72)
                 fused_arr = np.array(fused_img)
 
-            # CRT Power-Off collapse transition in the last 0.4 seconds of the video
-            if t >= total_duration - 0.4:
-                dt = t - (total_duration - 0.4)
-                norm = min(1.0, dt / 0.4)
+            # CRT Power-Off collapse transition in the last 0.2 seconds of the video
+            if t >= total_duration - 0.2:
+                dt = t - (total_duration - 0.2)
+                norm = min(1.0, dt / 0.2)
                 
                 # Canvas for rendering black background and collapse highlights
                 black_frame = Image.new("RGB", (w, h), (10, 15, 30)) # matching blueprint background tint
@@ -3220,7 +3254,7 @@ class VideoEngine:
 
                 s_clip = self._create_scene_clip(
                     bg_source=bg_videos[i],
-                    card_image=cards[i],
+                    card_image=cards[i] if i < scene_count - 1 else None,
                     audio_duration=audio_durations[audio_idx],
                     text=scene_texts[i],
                     delay_offset=delay_offset,

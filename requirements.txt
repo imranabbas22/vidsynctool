@@ -1,0 +1,29 @@
+# =============================================================================
+# "The Daily Audit" - Python Dependencies
+# =============================================================================
+# Core video pipeline
+Pillow>=10.0
+numpy>=1.24
+moviepy>=1.0.3
+imageio-ffmpeg>=0.4.9
+requests>=2.31
+python-dotenv>=1.0
+pydantic>=2.0
+google-generativeai>=0.8
+
+# Azure TTS (primary TTS engine — asset_generator.py)
+azure-cognitiveservices-speech>=1.30
+
+# YouTube upload (optional — youtube_uploader.py)
+google-api-python-client>=2.100
+google-auth-oauthlib>=1.0
+google-auth>=2.23
+
+# TikTok upload (optional — tiktok_uploader.py)
+playwright>=1.40
+
+# Offline TTS fallback (optional — asset_generator.py cascade 3)
+pyttsx3>=2.90
+
+# Testing
+pytest>=7.4

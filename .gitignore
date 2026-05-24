@@ -16,13 +16,18 @@ app_build/.venv/
 # Generated assets & media
 app_build/assets/*.mp4
 app_build/assets/*.mp3
+app_build/assets/*.wav
 app_build/assets/*.png
 app_build/assets/scraped/
+app_build/assets/sfx/
+app_build/assets/background_music/
+app_build/assets/fonts/
 assets/scraped/
 assets/video_blueprints/
 sample_video.mp4
 app_build/*TEMP_MPY*
 *TEMP_MPY*
+*_tts_*.lock
 
 # Database
 app_build/database/*.db
