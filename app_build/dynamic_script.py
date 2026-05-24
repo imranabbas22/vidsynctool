@@ -46,6 +46,7 @@ def parse_dynamic_ssml(ssml: str, scene_count: int) -> list[str]:
 
     def clean_text(t: str) -> str:
         t = re.sub(r'<[^>]+>', '', t).strip()
+        t = re.sub(r'\[[\w\s_/-]+\]', '', t).strip()
         return re.sub(r'\s+', ' ', t)
 
     if not matches:

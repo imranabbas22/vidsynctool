@@ -638,10 +638,15 @@ def test_azure_tts_sdk_success(monkeypatch, tmp_path):
     class MockSpeechSynthesisOutputFormat:
         Audio24Khz96KBitRateMonoMp3 = "Audio24Khz96KBitRateMonoMp3"
         
+    class MockEvent:
+        def connect(self, callback):
+            self.callback = callback
+            
     class MockSpeechSynthesizer:
         def __init__(self, speech_config, audio_config):
             self.speech_config = speech_config
             self.audio_config = audio_config
+            self.synthesis_word_boundary = MockEvent()
             
         def speak_ssml_async(self, ssml_text):
             self.ssml_text = ssml_text
@@ -651,6 +656,17 @@ def test_azure_tts_sdk_success(monkeypatch, tmp_path):
                     # Write dummy file to simulate output
                     with open(synthesizer_instance.audio_config.filename, "wb") as f:
                         f.write(b"mock_audio_content")
+                    # Simulate calling the word boundary callback
+                    if hasattr(synthesizer_instance.synthesis_word_boundary, "callback"):
+                        class MockEvt:
+                            def __init__(self, text, offset, duration):
+                                self.text = text
+                                self.audio_offset = offset
+                                self.duration = duration
+                        cb = synthesizer_instance.synthesis_word_boundary.callback
+                        # Mock 2 words to write a valid srt next to mp3
+                        cb(MockEvt("Hello", 1000000, 2000000)) # 100ms offset, 200ms duration (in ticks)
+                        cb(MockEvt("world", 3000000, 2000000)) # 300ms offset, 200ms duration
                     return MockResult(MockResultReason.SynthesizingAudioCompleted)
             return AsyncResult()
             
@@ -957,4 +973,300 @@ def test_compile_scene_based_video_mocked(tmp_path, monkeypatch):
     assert kwargs.get("codec") == expected_codec
 
 
+def test_narrator_expression_cues(tmp_path):
+    """Verifies that narrator expression brackets [sigh], [whisper] are handled correctly."""
+    # 1. Test SSML processor
+    generator = AssetGenerator()
+    text = "Hello [sigh] world. [whisper]whispered secret[/whisper] and [excited]excited statement[/excited]! [breathing]"
+    ssml = generator._process_brackets_to_ssml(text)
+    
+    assert '<mstts:paralinguistic type="sighing"/>' in ssml
+    assert '<mstts:paralinguistic type="breathing"/>' in ssml
+    assert '<mstts:express-as style="whispering">whispered secret</mstts:express-as>' in ssml
+    assert '<mstts:express-as style="excited">excited statement</mstts:express-as>' in ssml
 
+    # 2. Test word timing cleaning
+    engine = VideoEngine()
+    words_info = engine._parse_ssml_words_emphasis(text)
+    # The bracket cues should be fully stripped from subtitle words
+    words = [w["word"] for w in words_info]
+    assert "Hello" in words
+    assert "world." in words
+    assert "whispered" in words
+    assert "secret" in words
+    assert "excited" in words
+    assert "statement!" in words
+    assert "[sigh]" not in words
+    assert "[breathing]" not in words
+    assert "[whisper]" not in words
+    assert "[/whisper]" not in words
+
+    # 3. Test LLMOrchestrator word count calculation with bracket cues
+    payload = {
+        "hook": "Hello [sigh] world.",
+        "context": "[whisper]whispered secret[/whisper]",
+        "fact": "Reality check [breathing]."
+    }
+    word_count = LLMOrchestrator.calculate_word_count(payload)
+    # "Hello world. whispered secret Reality check ." -> 7 words
+    assert word_count == 7
+
+
+def test_retention_overhaul_pipeline():
+    """
+    Verifies the complete Retention Overhaul pipeline:
+    - Running PipelineOrchestrator to orchestrate two-pass prompts.
+    - Validating emotional styles mapping and breath marks via SSMLBuilder.
+    - Testing SubtitleBuilder subtitle SRT sync output.
+    - Testing RetentionReviewer rating and retry loops.
+    """
+    from pipeline.orchestrator import PipelineOrchestrator
+    from tts.ssml_builder import SSMLBuilder
+    from tts.subtitle_builder import SubtitleBuilder
+    from researcher_agent.reviewer import RetentionReviewer
+
+    # Mock responses for Pass 1 and Pass 2
+    pass1_json = {
+        "topic_core_mystery": "The mystery of cosmic dust",
+        "hook_question": "Did you know we breathe in stardust daily?",
+        "insight_units": [
+            {
+                "id": 1,
+                "assumption": "Space is empty",
+                "truth": "Space is filled with fine cosmic dust",
+                "emotion": "awe",
+                "complexity": "low",
+                "requires_visual": True,
+                "visual_search_query": "cosmic dust space"
+            },
+            {
+                "id": 2,
+                "assumption": "Cosmic dust is harmless",
+                "truth": "It actually affects weather patterns on Earth",
+                "emotion": "fear",
+                "complexity": "medium",
+                "requires_visual": True,
+                "visual_search_query": "earth atmosphere clouds"
+            },
+            {
+                "id": 3,
+                "assumption": "It is rare",
+                "truth": "Tons of cosmic debris fall to Earth every single hour",
+                "emotion": "disbelief",
+                "complexity": "medium",
+                "requires_visual": True,
+                "visual_search_query": "falling meteorites earth"
+            }
+        ],
+        "narrative_payoff": "We are walking stardust archives.",
+        "teaser_next": "Next: is dark matter inside your cell phone?"
+    }
+
+    pass2_json = [
+        {
+            "scene_id": 1,
+            "scene_type": "hook",
+            "duration_target_seconds": 3.5,
+            "narration_text": "Did you know we breathe in stardust daily?",
+            "ssml_emotion": "whisper",
+            "ssml_hint": "",
+            "visual_type": "generated",
+            "visual_query": "stardust breathing simulation",
+            "visual_position": "full",
+            "subtitle_text": "Did you know we breathe in stardust daily?",
+            "open_loop": True,
+            "closes_loop_from_scene": None,
+            "emotion_register": "question"
+        },
+        {
+            "scene_id": 2,
+            "scene_type": "body",
+            "duration_target_seconds": 5.0,
+            "narration_text": "Space is filled with fine cosmic dust.",
+            "ssml_emotion": "calm",
+            "ssml_hint": "",
+            "visual_type": "scraped",
+            "visual_query": "cosmic dust space",
+            "visual_position": "inset",
+            "subtitle_text": "Space is filled with fine cosmic dust.",
+            "open_loop": False,
+            "closes_loop_from_scene": 1,
+            "emotion_register": "release"
+        },
+        {
+            "scene_id": 3,
+            "scene_type": "body",
+            "duration_target_seconds": 5.5,
+            "narration_text": "Tons of cosmic debris fall to Earth every single hour.",
+            "ssml_emotion": "excited",
+            "ssml_hint": "",
+            "visual_type": "generated",
+            "visual_query": "falling meteorites earth",
+            "visual_position": "bottom_half",
+            "subtitle_text": "Tons of cosmic debris fall to Earth every single hour.",
+            "open_loop": True,
+            "closes_loop_from_scene": None,
+            "emotion_register": "tension"
+        },
+        {
+            "scene_id": 4,
+            "scene_type": "verdict",
+            "duration_target_seconds": 4.5,
+            "narration_text": "We are walking stardust archives.",
+            "ssml_emotion": "reverent",
+            "ssml_hint": "",
+            "visual_type": "diagram",
+            "visual_query": "human body made of dust",
+            "visual_position": "full",
+            "subtitle_text": "We are walking stardust archives.",
+            "open_loop": False,
+            "closes_loop_from_scene": 3,
+            "emotion_register": "payoff"
+        },
+        {
+            "scene_id": 5,
+            "scene_type": "exit",
+            "duration_target_seconds": 2.5,
+            "narration_text": "Next: is dark matter inside your cell phone?",
+            "ssml_emotion": "whisper",
+            "ssml_hint": "",
+            "visual_type": "generated",
+            "visual_query": "cell phone dark matter glow",
+            "visual_position": "full",
+            "subtitle_text": "Next: is dark matter inside your cell phone?",
+            "open_loop": True,
+            "closes_loop_from_scene": None,
+            "emotion_register": "question"
+        }
+    ]
+
+    # Mock Gemini client models
+    class MockResponse:
+        def __init__(self, text):
+            self.text = text
+
+    class MockModels:
+        def __init__(self):
+            self.call_count = 0
+
+        def generate_content(self, model, contents, config=None, **kwargs):
+            self.call_count += 1
+            # First call: Pass 1 Decomposition (JSON string response)
+            if "science knowledge decomposer" in contents or self.call_count == 1:
+                import json
+                return MockResponse(json.dumps(pass1_json))
+            # Second call: Pass 2 Scene Narrative Builder (JSON string response)
+            else:
+                import json
+                return MockResponse(json.dumps(pass2_json))
+
+    class MockClient:
+        def __init__(self):
+            self.models = MockModels()
+
+    mock_client = MockClient()
+
+    # 1. Verify PipelineOrchestrator Two-Pass & Review Flow
+    orchestrator = PipelineOrchestrator(mock_client)
+    
+    # We mock reviewer.review_scenes to fail first, then succeed on retry to test retry loops!
+    review_calls = []
+    def mock_review_scenes(scenes):
+        review_calls.append(scenes)
+        if len(review_calls) == 1:
+            # First review fails
+            return {
+                "scores": {
+                    "hook_strength": 5.0,
+                    "narrative_tension": 6.0,
+                    "visual_variety": 8.0,
+                    "payoff_satisfaction": 7.0,
+                    "exit_quality": 5.0
+                },
+                "overall": 6.2,
+                "pass": False,
+                "blocking_issues": ["Scene 1 hook lacks conspiratorial secret vibe"],
+                "suggested_fixes": ["Rephrase hook to sound like a secret"]
+            }
+        else:
+            # Second review passes
+            return {
+                "scores": {
+                    "hook_strength": 8.0,
+                    "narrative_tension": 8.0,
+                    "visual_variety": 9.0,
+                    "payoff_satisfaction": 8.0,
+                    "exit_quality": 8.0
+                },
+                "overall": 8.2,
+                "pass": True,
+                "blocking_issues": [],
+                "suggested_fixes": []
+            }
+            
+    orchestrator.reviewer.review_scenes = mock_review_scenes
+
+    results = orchestrator.run_research_pipeline("Stardust", "Scraped data")
+    
+    # Check that Pass 1 was called, and Pass 2 was called twice (due to the retry loop)
+    assert results["pass1_output"]["topic_core_mystery"] == "The mystery of cosmic dust"
+    assert len(review_calls) == 2
+    assert results["review"]["pass"] is True
+    assert results["review"]["overall"] == 8.2
+
+    # 2. Verify SSMLBuilder Emotional Styles & Silence Insertion
+    # whisper style mapping
+    ssml_whisper = SSMLBuilder.build_scene_ssml(
+        text="Did you know we breathe in stardust daily?",
+        emotion="whisper",
+        scene_type="hook",
+        voice_name="en-US-AndrewMultilingualNeural"
+    )
+    assert "style='whispering'" in ssml_whisper
+    # hook gets Leading silence of 200ms
+    assert "value='200ms'" in ssml_whisper
+
+    # body/verdict scenes get Sentenceboundary silence of 150ms
+    ssml_calm = SSMLBuilder.build_scene_ssml(
+        text="Space is filled with fine cosmic dust. Yes.",
+        emotion="calm",
+        scene_type="body",
+        voice_name="en-US-AndrewMultilingualNeural"
+    )
+    assert "style='calm'" in ssml_calm
+    assert "value='150ms'" in ssml_calm
+
+    # reverent style maps to lyrical
+    ssml_reverent = SSMLBuilder.build_scene_ssml(
+        text="We are walking stardust archives.",
+        emotion="reverent",
+        scene_type="verdict",
+        voice_name="en-US-AndrewMultilingualNeural"
+    )
+    assert "style='lyrical'" in ssml_reverent
+
+    # 3. Verify SubtitleBuilder groups word boundaries correctly into sentences/lines
+    # Simulated word boundary events
+    # Each word boundary event has: word, offset_ms, duration_ms
+    word_boundaries = [
+        {"word": "Did", "offset_ms": 100, "duration_ms": 200},
+        {"word": "you", "offset_ms": 300, "duration_ms": 200},
+        {"word": "know", "offset_ms": 500, "duration_ms": 200},
+        {"word": "we", "offset_ms": 700, "duration_ms": 200},
+        {"word": "breathe", "offset_ms": 900, "duration_ms": 300},
+        {"word": "in", "offset_ms": 1200, "duration_ms": 100},
+        {"word": "stardust", "offset_ms": 1300, "duration_ms": 400},
+        {"word": "daily?", "offset_ms": 1700, "duration_ms": 400}
+    ]
+    # Call SubtitleBuilder.group_words_into_subtitles
+    srt_blocks = SubtitleBuilder.group_words_into_subtitles(word_boundaries)
+    assert len(srt_blocks) > 0
+    # First block should cover start to end of words
+    assert srt_blocks[0]["start_ms"] == 100
+    assert srt_blocks[0]["end_ms"] == 2100 # 1700 + 400
+    # Check max words rule (max 7 per line, max 2 lines visible -> max 14 words per block)
+    # The word list is 8 words. Let's make sure they are divided into lines with max 7 words
+    text_lines = srt_blocks[0]["text"].split("\n")
+    assert len(text_lines) <= 2
+    for line in text_lines:
+        assert len(line.split()) <= 7

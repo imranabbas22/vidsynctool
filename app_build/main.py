@@ -552,19 +552,34 @@ def run_pipeline():
             user_prompt = args.prompt
             print(f"[Main] DYNAMIC MODE: Processing user prompt: '{user_prompt}'")
 
-            # 1. Research phase
+            # 1. Research phase (Wikipedia scrape)
             try:
-                from research_agent import ResearchAgent
-                research_agent = ResearchAgent(client=client_ref)
-                plan = research_agent.analyze_prompt(user_prompt)
-                topic = plan.topic
-                category = plan.category
-                print(f"[Main] Research plan: topic='{topic}', category='{category}', scenes={plan.scene_count}")
+                scraper = DataScraper()
+                print(f"[Main] Scraping research data for prompt: '{user_prompt}'")
+                scraped_data = scraper.scrape_wikipedia_summary(user_prompt)
+                print(f"[Main] Scraped {len(scraped_data)} chars of research data.")
             except Exception as e:
-                print(f"[Main] CRITICAL: Research agent failed: {e}")
+                print(f"[Main] ERROR: Scraper failed: {e}")
+                scraped_data = f"No direct search results found for topic: {user_prompt}"
+
+            # 2. Run the two-pass research agent prompt chain & reviewer loop
+            try:
+                from pipeline.orchestrator import PipelineOrchestrator
+                pipe_orchestrator = PipelineOrchestrator(client_ref)
+                
+                pipeline_results = pipe_orchestrator.run_research_pipeline(user_prompt, scraped_data)
+                pass1_output = pipeline_results["pass1_output"]
+                scene_sequence = pipeline_results["scene_sequence"]
+                review_res = pipeline_results["review"]
+                
+                topic = pass1_output.get("topic_core_mystery", user_prompt)
+                category = "bizarre"
+                print(f"[Main] Pipeline completed: topic='{topic}', scenes={len(scene_sequence)}")
+            except Exception as e:
+                print(f"[Main] CRITICAL: Pipeline orchestrator failed: {e}")
                 sys.exit(1)
 
-            # 2. Initialize Asset Generator and Data Scraper
+            # 3. Initialize Asset Generator
             try:
                 gcp_cred = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
                 asset_gen = AssetGenerator(gemini_client=client_ref, gcp_credentials_path=gcp_cred)
@@ -572,73 +587,115 @@ def run_pipeline():
                 print(f"[Main] CRITICAL: Failed to initialize Asset Generator: {e}")
                 sys.exit(1)
 
-            # 3. Fetch materials (images per scene)
-            materials = research_agent.fetch_research_materials(plan)
-            image_paths = materials["images"]
-            print(f"[Main] Fetched {len(image_paths)} scene images")
+            # 4. Fetch materials (images per content scene)
+            image_paths = []
+            timestamp = str(int(time.time()))
+            
+            content_scenes = scene_sequence[1:-1]
+            for i, scene in enumerate(content_scenes):
+                query = scene.get("visual_query", "").strip()
+                if not query:
+                    query = topic
+                
+                try:
+                    print(f"[Main] Fetching image for content scene {i+1} using query: '{query}'")
+                    path = scraper.fetch_image_multi_source(query, f"dynamic_{timestamp}_scene{i}")
+                    if path:
+                        image_paths.append(path)
+                    else:
+                        print(f"[Main] No image found for scene {i} query '{query}', generating fallback blueprint...")
+                        fallback_path = os.path.join(asset_gen.assets_dir, f"dynamic_fallback_{timestamp}_scene{i}.png")
+                        path = asset_gen._render_programmatic_blueprint(query, fallback_path)
+                        image_paths.append(path)
+                except Exception as e:
+                    print(f"[Main] Image fetch failed for scene {i}: {e}, generating fallback blueprint...")
+                    fallback_path = os.path.join(asset_gen.assets_dir, f"dynamic_fallback_{timestamp}_scene{i}.png")
+                    try:
+                        path = asset_gen._render_programmatic_blueprint(query, fallback_path)
+                        image_paths.append(path)
+                    except Exception:
+                        from PIL import Image
+                        os.makedirs(asset_gen.assets_dir, exist_ok=True)
+                        Image.new("RGB", (1080, 1920), (10, 24, 47)).save(fallback_path)
+                        image_paths.append(fallback_path)
 
-            # 4. Generate dynamic N-scene script
-            try:
-                script_payload = orchestrator.generate_dynamic_script(plan)
-                print(f"[Main] Dynamic script generated: {len(script_payload.scenes)} scenes")
-            except Exception as e:
-                print(f"[Main] ERROR: Dynamic script generation failed: {e}")
-                sys.exit(1)
+            print(f"[Main] Fetched {len(image_paths)} scene images")
 
             # 5. Generate TTS audio (N+2 files: starting + N scenes + ending)
             audio_paths = []
             try:
-                starting_text = "Now, bringing you the declassified truth."
-                starting_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{starting_text}</prosody>"
-                print(f"[Main] Dynamic Starting Bumper: '{starting_text}'")
-
-                ending_text = f"{cta_text} CLASS DISMISSED."
-                ending_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{ending_text}</prosody>"
-                print(f"[Main] Dynamic Ending Bumper: '{ending_text}'")
-
-                # Starting and ending
-                audio_paths.append(asset_gen.generate_tts_audio(starting_ssml_wrapped, f"dynamic_tts_{timestamp}_starting", is_ssml=True))
-
-                # N scenes
-                for i, scene in enumerate(script_payload.scenes):
-                    scene_ssml = scene.ssml
-                    print(f"[Main] Dynamic Scene {i+1} SSML: {scene_ssml[:60]}...")
-                    audio_paths.append(asset_gen.generate_tts_audio(scene_ssml, f"dynamic_tts_{timestamp}_s{i}", is_ssml=True))
-
-                # Ending
-                audio_paths.append(asset_gen.generate_tts_audio(ending_ssml_wrapped, f"dynamic_tts_{timestamp}_ending", is_ssml=True))
-
-                scene_count = len(script_payload.scenes)
-                print(f"[Main] Generated {len(audio_paths)} TTS audio files for {scene_count} scenes")
+                from tts.ssml_builder import SSMLBuilder
+                
+                for i, scene in enumerate(scene_sequence):
+                    text = scene["narration_text"]
+                    emotion = scene.get("ssml_emotion", "calm")
+                    scene_type = scene["scene_type"]
+                    
+                    scene_ssml = SSMLBuilder.build_scene_ssml(
+                        text=text,
+                        emotion=emotion,
+                        scene_type=scene_type,
+                        voice_name=asset_gen.voice_name
+                    )
+                    
+                    label = f"dynamic_tts_{timestamp}_{scene_type}_{i}"
+                    print(f"[Main] Dynamic Scene {i+1} ({scene_type.upper()}): emotion='{emotion}' -> Generating TTS...")
+                    
+                    audio_path = asset_gen.generate_tts_audio(scene_ssml, label, is_ssml=True)
+                    audio_paths.append(audio_path)
+                    
+                scene_count = len(scene_sequence) - 2
+                print(f"[Main] Generated {len(audio_paths)} TTS audio files for {scene_count} content scenes")
             except Exception as e:
                 print(f"[Main] ERROR: TTS generation failed: {e}")
                 sys.exit(1)
 
-            # 6. Compile dynamic N-scene video
-            meta = script_payload.youtube_metadata.model_dump() if hasattr(script_payload.youtube_metadata, 'model_dump') else {}
-            title = meta.get("title", f"The Daily Audit: {topic} #Shorts")
+            # 6. Build metadata and compile dynamic N-scene video
+            title = f"The Surprising Truth About {topic} #Shorts"
+            title = title[:90] + " #Shorts"
+            tags = ["education", "science", "shorts", "mystery", "declassified"]
+            base_desc = (
+                f"Declassifying the truth about {topic}.\n\n"
+                f"Narrative Payoff: {pass1_output.get('narrative_payoff', '')}\n\n"
+                f"Next: {pass1_output.get('teaser_next', '')}"
+            )
+            meta = {
+                "title": title,
+                "tags": tags,
+                "description": base_desc
+            }
             clean_title = re.sub(r'[<>:"/\\|?*#]', '', title).strip().replace(' ', '_')[:100]
 
             try:
                 video_eng = VideoEngine()
                 video_name = f"{clean_title}_{timestamp}"
+                
+                scene_titles = []
+                for i, s in enumerate(scene_sequence[1:-1]):
+                    t = "THE PARADOX" if s["scene_type"] == "body" and s.get("emotion_register") == "tension" else "THE REVELATION"
+                    if s["scene_type"] == "verdict":
+                        t = "THE DECLASSIFIED TRUTH"
+                    scene_titles.append(t)
+                    
+                scene_labels = [f"[ SCENE {i+1} ]" for i in range(len(scene_sequence[1:-1]))]
+
                 video_path = video_eng.compile_dynamic_video(
                     image_paths=image_paths,
                     audio_paths=audio_paths,
-                    scene_texts=[s.ssml for s in script_payload.scenes],
-                    scene_titles=[s.title for s in script_payload.scenes],
-                    scene_labels=[f"[ SCENE {i+1} ]" for i in range(len(script_payload.scenes))],
+                    scene_texts=[s["narration_text"] for s in scene_sequence[1:-1]],
+                    scene_titles=scene_titles,
+                    scene_labels=scene_labels,
                     output_name=video_name,
                     category=category,
                     style=video_style,
                     video_type="dynamic",
-                    starting_text=starting_text,
-                    ending_text=ending_text
+                    starting_text=scene_sequence[0]["narration_text"],
+                    ending_text=scene_sequence[-1]["narration_text"]
                 )
                 print(f"[Main] Dynamic video assembled successfully: {video_path}")
-                # Generate thumbnail
+                
                 video_eng.generate_thumbnail(
-                    topic, script_payload.scenes[0].text if script_payload.scenes else topic,
+                    topic, scene_sequence[1]["narration_text"] if len(scene_sequence) > 1 else topic,
                     video_name, style=video_style,
                     img_myth_path=image_paths[0] if image_paths else None,
                     img_truth_path=image_paths[-1] if len(image_paths) > 1 else None,
@@ -648,7 +705,7 @@ def run_pipeline():
                 print(f"[Main] ERROR: Video engine compilation failed: {e}")
                 sys.exit(1)
 
-            hook_text = script_payload.scenes[0].text if script_payload.scenes else ""
+            hook_text = scene_sequence[0]["narration_text"] if scene_sequence else ""
 
         # =========================================================================
         # UPLOAD AND FINALIZATION SUBSYSTEM

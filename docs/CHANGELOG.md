@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.6.0] - 2026-05-24
+
+### Added
+- **Two-Pass Researcher Prompt Chain**: Implemented a two-pass prompt chain (Pass 1: Knowledge Decomposition for surprising atomic truths, Pass 2: Scene Narrative Builder for a scene-by-scene script sequence).
+- **Retention Reviewer Agent**: Implemented a dedicated retention review step scoring hook strength, narrative tension, visual variety, payoff satisfaction, and exit quality (overall score threshold >= 7.0, max 2 retries).
+- **Azure Word Boundary Subtitles**: Refactored the subtitle builder to group Azure word boundary events into full-line sentences (max 2 lines, max 7 words per line) positioned in the lower third (y_pos=1450) and styled with white fill and a 2px black outline (no background highlights/pills).
+- **SSML Emotion & Silence Mapping**: Added emotional style mapping (whispering, excited, calm, lyrical, newscast) to Azure styles with sentence-boundary pauses (150ms) for body/verdict scenes and leading inhales (200ms) for hooks.
+- **Dynamic Bumper Audio Propagation**: Propagated companion SRT files and audio paths to starting and ending bumpers.
+- **Unit & Integration Testing**: Appended `test_retention_overhaul_pipeline` verifying orchestrator prompt flow, review retry loops, emotional style mapping, and subtitle grouping.
+- **Local Testing Synchronization**: Ported the dynamic prompt-driven two-pass pipeline, Wikipedia scraper, and emotional SSML building setup to `main_local.py` for headless debug workflows.
+
+### Fixed
+- **Narration Audio Offset Correction**: Prevented MoviePy from dropping start offsets when concatenating scenes by manual timeline-based compositing of content scene narration tracks. This ensures the 1.75-second card pop delay is correctly preserved in both audio and subtitles for Scene 1 and Scene 2.
+- **Subtitle Sync Lookahead Offset**: Added a 200ms lookahead shift (`self.subtitle_lookahead_ms = 200.0`) to subtitle block rendering time calculations (`t_audio_ms` / `t_ms`) inside starting bumpers, body scenes, and ending bumpers. This corrects the minor lag between narration audio playback and visual subtitle rendering.
+- **Forensic Card Overlap**: Shifted the vertical center of the forensic cards up to `cy=900` across both `compile_short` and `_create_scene_clip` rendering to prevent them from being covered by the lower-third subtitles.
+- **Robust Subtitle Wrapping**: Added automatic word-wrapping logic inside `_render_srt_subtitle_block` to guarantee that text is broken into multiple lines if it exceeds the `960px` safe margin width, preventing subtitles from going off the video canvas.
+
+## [4.5.6] - 2026-05-24
+
+### Fixed
+- **Defensive SSML Field Fallback**: Replaced nested `.get(key, default)` chaining with `or` short-circuit eval in `compile_short`, `compile_bizarre`, and timing methods across `video_engine.py` to correctly fall through `None`/empty-string values when resolving SSML field keys (`s1_ssml`, `s2_ssml`, `s3_ssml`, `mid_roll_hook`, and legacy field names). This prevents empty-string truthy values from blocking fallback to alternative keys.
+
+## [4.5.5] - 2026-05-24
+
+### Added
+- **Immersive Narrator Expression Cues & Speaking Styles**: Added support for paralinguistic tags (`[sigh]`, `[breathing]`, `[gasp]`, `[laughter]`, `[giggle]`, `[throat-clearing]`, `[cough]`, `[yawn]`) and voice style tags (`[whisper]...[/whisper]`, `[cheerful]...[/cheerful]`, `[excited]...[/excited]`, `[sad]...[/sad]`, `[angry]...[/angry]`, `[hopeful]...[/hopeful]`, `[friendly]...[/friendly]`, `[unfriendly]...[/unfriendly]`, `[terrified]...[/terrified]`, `[shouting]...[/shouting]`, `[empathetic]...[/empathetic]`, `[relieved]...[/relieved]`) in script narration.
+- **SSML Namespace Integration**: Added the `xmlns:mstts="https://www.w3.org/2001/mstts"` namespace declaration to the root `<speak>` elements in `asset_generator.py` to enable Azure Cognitive Services Speech SDK and REST API emotional/paralinguistic support.
+- **Subtitle & Timing Filtering**: Programmed the subtitle engine, dynamic script parser, and word count utility to strip narrator bracket cues from transcript rendering, timing computations, and word metrics to prevent brackets from showing as subtitles.
+- **Hardened System Prompts**: Updated system instructions for dynamic, myth, and bizarre script generators to guide Gemini to organically inject these immersive and iconic narrator expression cues.
+- **Unit Testing**: Added the `test_narrator_expression_cues` suite to verify SSML conversion, subtitle word timing filtering, and word metrics calculation.
+
 ## [4.5.4] - 2026-05-24
 
 ### Added

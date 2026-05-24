@@ -33,17 +33,107 @@ class AssetGenerator:
         self.assets_dir = os.path.join(base_dir, "assets")
         os.makedirs(self.assets_dir, exist_ok=True)
 
+    def _process_brackets_to_ssml(self, text: str) -> str:
+        """
+        Converts human emotion style brackets (like [whisper]...[/whisper]) and paralinguistic cues
+        (like [sigh], [breathing]) into Azure SSML mstts tags.
+        """
+        import re
+        
+        # 1. Handle self-closing paralinguistic tags
+        paralinguistic_map = {
+            r'\[sigh(?:ing)?\]': '<mstts:paralinguistic type="sighing"/>',
+            r'\[breath(?:ing)?\]': '<mstts:paralinguistic type="breathing"/>',
+            r'\[gasp(?:ing)?\]': '<mstts:paralinguistic type="breathing"/>',
+            r'\[laugh(?:ter|ing)?\]': '<mstts:paralinguistic type="laughter"/>',
+            r'\[giggle\]': '<mstts:paralinguistic type="laughter"/>',
+            r'\[throat[-_]clearing\]': '<mstts:paralinguistic type="throat_clearing"/>',
+            r'\[cough(?:ing)?\]': '<mstts:paralinguistic type="coughing"/>',
+            r'\[yawn(?:ing)?\]': '<mstts:paralinguistic type="yawning"/>',
+        }
+        
+        processed = text
+        for pattern, tag in paralinguistic_map.items():
+            processed = re.sub(pattern, tag, processed, flags=re.IGNORECASE)
+            
+        # 2. Handle block styles like [whisper]...[/whisper] or [whispering]...[/whispering]
+        # Common styles: whispering, cheerful, sad, excited, angry, terrified, hopeful, friendly, unfriendly, shouting, empathetic, relieved
+        styles = ["whispering", "whisper", "cheerful", "sad", "excited", "angry", "terrified", "hopeful", "friendly", "unfriendly", "shouting", "empathetic", "relieved"]
+        for s in styles:
+            # Map alias "whisper" to Azure style "whispering"
+            azure_style = "whispering" if s == "whisper" else s
+            # Match [style]...[/style]
+            pattern_block = rf'\[{s}\](.*?)\[/{s}\]'
+            replacement_block = f'<mstts:express-as style="{azure_style}">\\1</mstts:express-as>'
+            processed = re.sub(pattern_block, replacement_block, processed, flags=re.DOTALL | re.IGNORECASE)
+            
+            # Match unclosed [style] and close it at the end of the text/prosody block if any remains
+            pattern_start = rf'\[{s}\]'
+            if re.search(pattern_start, processed, flags=re.IGNORECASE):
+                processed = re.sub(pattern_start, f'<mstts:express-as style="{azure_style}">', processed, flags=re.IGNORECASE)
+                processed = processed + '</mstts:express-as>'
+                
+        return processed
+
+    def _write_srt_from_word_boundaries(self, word_boundaries: list, audio_path: str):
+        try:
+            from tts.subtitle_builder import SubtitleBuilder
+            sub_items = SubtitleBuilder.group_words_into_subtitles(word_boundaries)
+            srt_content = SubtitleBuilder.build_srt(sub_items)
+            srt_path = os.path.splitext(audio_path)[0] + ".srt"
+            with open(srt_path, "w", encoding="utf-8") as f:
+                f.write(srt_content)
+            print(f"[AssetGen] Subtitle SRT generated: {srt_path}")
+        except Exception as e:
+            print(f"[AssetGen] WARNING: Failed to generate subtitle SRT: {e}")
+
+    def _estimate_word_boundaries(self, text: str, audio_path: str) -> list:
+        duration = 5.0
+        try:
+            from moviepy.editor import AudioFileClip
+            clip = AudioFileClip(audio_path)
+            duration = clip.duration
+            clip.close()
+        except Exception:
+            pass
+            
+        import re
+        clean_text = re.sub(r'<[^>]*>', '', text)
+        clean_text = re.sub(r'\[[\w\s_/-]+\]', '', clean_text).strip()
+        words = clean_text.split()
+        if not words:
+            return []
+            
+        total_chars = sum(len(w) for w in words)
+        sec_per_char = duration / total_chars if total_chars > 0 else 0.1
+        
+        word_boundaries = []
+        current_time = 0.0
+        for w in words:
+            word_dur = len(w) * sec_per_char
+            word_boundaries.append({
+                "word": w,
+                "offset_ms": current_time * 1000.0,
+                "duration_ms": word_dur * 1000.0
+            })
+            current_time += word_dur
+        return word_boundaries
+
     def generate_tts_audio(self, text: str, output_name: str, is_ssml: bool = False) -> str:
         """
         Synthesizes script text into an MP3 file using Microsoft Azure Cognitive Services Speech SDK.
         Uses voice specified by self.voice_name (defaults to en-US-AndrewMultilingualNeural).
         Supports SSML for dramatic phrasing, stern pausing, and rate modulation.
+        Processes bracket tags like [sigh] or [whisper]...[/whisper] to enrich narration.
         """
         output_path = os.path.join(self.assets_dir, f"{output_name}.mp3")
         
+        # Pre-process brackets into Azure SSML tags
+        text_with_cues = self._process_brackets_to_ssml(text)
+        
         # Format the text into standard Azure Speech SSML
         if is_ssml:
-            inner_text = text.strip()
+            inner_text = text_with_cues.strip()
             # If the text already has a root <speak> element, strip it to avoid duplicates
             if inner_text.startswith("<speak>"):
                 inner_text = inner_text[7:]
@@ -52,6 +142,7 @@ class AssetGenerator:
             
             processed_text = (
                 f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+                f'xmlns:mstts="https://www.w3.org/2001/mstts" '
                 f'xml:lang="en-US">'
                 f'<voice name="{self.voice_name}">'
                 f'{inner_text}'
@@ -62,10 +153,11 @@ class AssetGenerator:
             # Wrap plain text in SSML to apply the configured voice and default speaking rate
             processed_text = (
                 f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+                f'xmlns:mstts="https://www.w3.org/2001/mstts" '
                 f'xml:lang="en-US">'
                 f'<voice name="{self.voice_name}">'
                 f'<prosody rate="0.93">'
-                f'{text}'
+                f'{text_with_cues}'
                 f'</prosody>'
                 f'</voice>'
                 f'</speak>'
@@ -119,11 +211,21 @@ class AssetGenerator:
                     
                     synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
                     
+                    word_boundaries = []
+                    def on_word_boundary(evt):
+                        word_boundaries.append({
+                            "word": evt.text,
+                            "offset_ms": evt.audio_offset / 10000.0,  # ticks to ms
+                            "duration_ms": evt.duration / 10000.0
+                        })
+                    synthesizer.synthesis_word_boundary.connect(on_word_boundary)
+
                     print(f"[AssetGen] Requesting Azure SDK TTS (Voice={self.voice_name}, Region={self.azure_speech_region}) for: '{text[:50]}...'")
                     result = synthesizer.speak_ssml_async(processed_text).get()
                     
                     if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
                         print(f"[AssetGen] TTS Audio generated: {output_path}")
+                        self._write_srt_from_word_boundaries(word_boundaries, output_path)
                         return output_path
                     else:
                         details = speechsdk.SpeechSynthesisCancellationDetails.from_result(result)
@@ -137,14 +239,22 @@ class AssetGenerator:
                     
                     # Cascade 2: Azure Speech REST API Fallback
                     try:
-                        return self._generate_azure_rest_tts(processed_text, output_path)
+                        res_path = self._generate_azure_rest_tts(processed_text, output_path)
+                        w_bounds = self._estimate_word_boundaries(text, output_path)
+                        self._write_srt_from_word_boundaries(w_bounds, output_path)
+                        return res_path
                     except Exception as rest_err:
                         print(f"[AssetGen] Azure REST API fallback failed ({rest_err}). Synthesizing offline mockup audio...")
                         
                         # Cascade 3: Offline Mockup Audio
                         import re
+                        # Clean both XML and bracket emotion cues before sending to offline mockup
                         plain_text = re.sub(r'<[^>]*>', '', text)
-                        return self._generate_offline_mockup_audio(plain_text, output_path)
+                        plain_text = re.sub(r'\[[\w\s_/-]+\]', '', plain_text).strip()
+                        res_path = self._generate_offline_mockup_audio(plain_text, output_path)
+                        w_bounds = self._estimate_word_boundaries(plain_text, output_path)
+                        self._write_srt_from_word_boundaries(w_bounds, output_path)
+                        return res_path
             finally:
                 if fd is not None:
                     try:

@@ -220,3 +220,46 @@ class DataScraper:
                 print(f"[Scraper] Scene {idx} image secured: {path}")
         print(f"[Scraper] Total scene images: {len(paths)} (target: 1-{max_images})")
         return paths
+
+    def scrape_wikipedia_summary(self, query: str) -> str:
+        """
+        Retrieves the plain-text intro section of the Wikipedia article matching the query.
+        """
+        if not query or not query.strip():
+            return ""
+        clean_query = query.strip()
+        
+        # Step 1: Search Wikipedia
+        search_url = (
+            "https://en.wikipedia.org/w/api.php?"
+            "action=query&format=json&list=search&"
+            f"srsearch={urllib.parse.quote(clean_query)}&utf8=1&formatversion=2"
+        )
+        try:
+            r = requests.get(search_url, headers=self.headers, timeout=10)
+            r.raise_for_status()
+            search_results = r.json().get("query", {}).get("search", [])
+            if not search_results:
+                return f"No direct search results found for topic: {clean_query}"
+            
+            best_match_title = search_results[0]["title"]
+            snippet = search_results[0].get("snippet", "")
+            
+            # Step 2: Get intro extract
+            extract_url = (
+                "https://en.wikipedia.org/w/api.php?"
+                "action=query&format=json&prop=extracts&exintro=1&explaintext=1&"
+                f"titles={urllib.parse.quote(best_match_title)}&formatversion=2"
+            )
+            r_ext = requests.get(extract_url, headers=self.headers, timeout=10)
+            r_ext.raise_for_status()
+            pages = r_ext.json().get("query", {}).get("pages", [])
+            if pages and "extract" in pages[0]:
+                return pages[0]["extract"]
+            
+            import re
+            clean_snippet = re.sub(r'<[^>]+>', '', snippet)
+            return f"Topic: {best_match_title}. Summary: {clean_snippet}"
+        except Exception as e:
+            return f"Error searching research data for '{clean_query}': {e}"
+

@@ -218,6 +218,7 @@ class LLMOrchestrator:
 
         def clean_text(t: str) -> str:
             t = re.sub(r'<[^>]+>', '', t).strip()
+            t = re.sub(r'\[[\w\s_/-]+\]', '', t).strip()
             return re.sub(r'\s+', ' ', t)
 
         def clean_ssml_segment(t: str) -> str:
@@ -325,6 +326,11 @@ class LLMOrchestrator:
             "Start hooks strictly using whistleblower, declassified document, or whistleblower file references (e.g., 'The file they tried to bury...', 'Declassified file 942 reveals...').\n"
             "Make the debunk genuinely surprising — the audience should feel foolish for having believed the myth.\n"
             "Scene 1 and Scene 3 must be 8 to 12 words. Scene 2 must be 12 to 18 words. No sign-off or 'Class dismissed' in the script.\n"
+            "To deepen immersion and make the voice iconic, you can inject paralinguistic and emotion style bracket cues (max 1-2 per script, keep it subtle):\n"
+            "- Use [sigh] for a sigh of disappointment or disbelief.\n"
+            "- Use [breathing] or [gasp] for dramatic tension.\n"
+            "- Use [whisper]confidential reveal[/whisper] for whispering facts.\n"
+            "- Use [cheerful]text[/cheerful], [sad]text[/sad], or [excited]text[/excited] to shift speaker emotion.\n"
             "Ensure the visual prompts are highly descriptive, specific, and specify raw concrete details for Wikipedia/Commons image matching.\n"
             "You must generate the complete inner SSML script conforming to the teacher prompt rules, and also supply visual prompts and youtube metadata.\n"
             "Optionally include a 3-5 word mid-roll retention hook in scene 2 if it feels natural. "
@@ -393,6 +399,11 @@ class LLMOrchestrator:
             "Start hooks strictly using whistleblower, declassified document, or whistleblower file references (e.g., 'The file they tried to bury...', 'Declassified file 942 reveals...').\n"
             "Make the bizarre twist genuinely surprising.\n"
             "Scene 1 and Scene 3 must be 8 to 12 words. Scene 2 must be 12 to 18 words. No sign-off or 'Class dismissed' in the script.\n"
+            "To deepen immersion and make the voice iconic, you can inject paralinguistic and emotion style bracket cues (max 1-2 per script, keep it subtle):\n"
+            "- Use [sigh] for a sigh of disappointment or disbelief.\n"
+            "- Use [breathing] or [gasp] for dramatic tension.\n"
+            "- Use [whisper]confidential reveal[/whisper] for whispering facts.\n"
+            "- Use [cheerful]text[/cheerful], [sad]text[/sad], or [excited]text[/excited] to shift speaker emotion.\n"
             "Ensure that image/scene search queries are highly specific, featuring direct scientific/historical terminology rather than broad words.\n"
             "You must generate the complete inner SSML script conforming to the teacher prompt rules, and also supply scene queries and youtube metadata.\n"
             "Optionally include a 3-5 word mid-roll retention hook in scene 2 if it feels natural. "
@@ -447,6 +458,11 @@ class LLMOrchestrator:
             "Each scene must be 10 to 20 words. No sign-off or 'Class dismissed' in the script.\n"
             f"The script must have exactly {plan.scene_count} scenes.\n"
             "Use <break time=\"600ms\"/> between every adjacent scene (NOT 700ms or 1200ms).\n"
+            "To deepen immersion and make the voice iconic, you can inject paralinguistic and emotion style bracket cues (max 1-2 per script, keep it subtle):\n"
+            "- Use [sigh] for a sigh of disappointment or disbelief.\n"
+            "- Use [breathing] or [gasp] for dramatic tension.\n"
+            "- Use [whisper]confidential reveal[/whisper] for whispering facts.\n"
+            "- Use [cheerful]text[/cheerful], [sad]text[/sad], or [excited]text[/excited] to shift speaker emotion.\n"
             "Return ONLY the inner SSML content, no speak or voice tags.\n"
             "No markdown, no explanation, just the script.\n"
             "Optionally include a 3-5 word mid-roll retention hook per scene if it feels natural. "
@@ -545,7 +561,11 @@ class LLMOrchestrator:
     @staticmethod
     def calculate_word_count(payload: Dict[str, Any]) -> int:
         """Calculates the total spoken word count of the script (3 content scenes only)."""
+        import re
         script_text = f"{payload.get('hook', '')} {payload.get('context', '')} {payload.get('fact', '')}"
+        # Clean both XML and bracket emotion cues before counting words
+        script_text = re.sub(r'<[^>]+>', '', script_text)
+        script_text = re.sub(r'\[[\w\s_/-]+\]', '', script_text)
         return len(script_text.split())
 
 if __name__ == "__main__":

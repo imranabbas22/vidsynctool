@@ -171,6 +171,9 @@ class VideoEngine:
         # Detect CUDA support once on startup
         self.has_cuda = self._detect_cuda_support()
 
+        # Lookahead offset (in ms) to pull subtitles forward so they match the audio timing.
+        self.subtitle_lookahead_ms = 200.0
+
     def _detect_cuda_support(self) -> bool:
         """
         Queries FFmpeg's available encoders to check if the NVIDIA NVENC H.264
@@ -658,9 +661,9 @@ class VideoEngine:
         audio_path is a 5-element list: [starting_tts, s1_tts, s2_tts, s3_tts, ending_tts]
         """
         if isinstance(audio_path, list):
-            hook = script_payload.get("s1_ssml", script_payload.get("hook_ssml", script_payload.get("hook", ""))).strip()
-            context = script_payload.get("s2_ssml", script_payload.get("context_ssml", script_payload.get("context", ""))).strip()
-            fact = script_payload.get("s3_ssml", script_payload.get("fact_ssml", script_payload.get("fact", ""))).strip()
+            hook = (script_payload.get("s1_ssml") or script_payload.get("hook_ssml") or script_payload.get("hook") or "").strip()
+            context = (script_payload.get("s2_ssml") or script_payload.get("context_ssml") or script_payload.get("context") or "").strip()
+            fact = (script_payload.get("s3_ssml") or script_payload.get("fact_ssml") or script_payload.get("fact") or "").strip()
             
             scene_texts = [
                 hook,
@@ -683,7 +686,7 @@ class VideoEngine:
                 image_truth_path or image_myth_path
             ]
             # Build mid_roll word indices from scene 2 text
-            mid_roll_hook = script_payload.get("mid_roll_hook", "").strip().lower()
+            mid_roll_hook = (script_payload.get("mid_roll_hook") or "").strip().lower()
             mid_roll_word_indices = None
             if mid_roll_hook and len(scene_texts) > 1:
                 hook_words = mid_roll_hook.split()
@@ -1093,9 +1096,9 @@ class VideoEngine:
                 new_h = int(890 * s_factor)
                 if new_w > 10 and new_h > 10:
                     scaled_card = active_card.resize((new_w, new_h), Image.Resampling.LANCZOS)
-                    # Centered on anchor point: cx=540, cy=1040 (matches 120, 620 offset of 840x840 card)
+                    # Centered on anchor point: cx=540, cy=900 (matches 120, 480 offset of 840x840 card)
                     px = 540 - new_w // 2
-                    py = 1040 - new_h // 2
+                    py = 900 - new_h // 2
                     
                     # Temporarily paste using PIL
                     fused_img = Image.fromarray(fused_arr)
@@ -1374,9 +1377,9 @@ class VideoEngine:
         audio_path is a 5-element list: [starting_tts, s1_tts, s2_tts, s3_tts, ending_tts]
         """
         if isinstance(audio_path, list):
-            hook = script_payload.get("s1_ssml", script_payload.get("hook_ssml", script_payload.get("hook", ""))).strip()
-            why_bizarre = script_payload.get("s2_ssml", script_payload.get("why_bizarre_ssml", script_payload.get("why_bizarre", ""))).strip()
-            closing = script_payload.get("s3_ssml", script_payload.get("closing_statement_ssml", script_payload.get("closing_statement", ""))).strip()
+            hook = (script_payload.get("s1_ssml") or script_payload.get("hook_ssml") or script_payload.get("hook") or "").strip()
+            why_bizarre = (script_payload.get("s2_ssml") or script_payload.get("why_bizarre_ssml") or script_payload.get("why_bizarre") or "").strip()
+            closing = (script_payload.get("s3_ssml") or script_payload.get("closing_statement_ssml") or script_payload.get("closing_statement") or "").strip()
             
             scene_texts = [
                 hook,
@@ -1400,7 +1403,7 @@ class VideoEngine:
                 imgs.append(imgs[-1] if imgs else "")
 
             # Build mid_roll word indices from scene 2 text
-            mid_roll_hook = script_payload.get("mid_roll_hook", "").strip().lower()
+            mid_roll_hook = (script_payload.get("mid_roll_hook") or "").strip().lower()
             mid_roll_word_indices = None
             if mid_roll_hook and len(scene_texts) > 1:
                 hook_words = mid_roll_hook.split()
@@ -1464,12 +1467,12 @@ class VideoEngine:
             bg_images.append(bg_images[-1])
 
         # Script parts
-        hook = script_payload.get("hook", "").strip()
-        story_brief = script_payload.get("story_brief", "").strip()
-        why_bizarre = script_payload.get("why_bizarre", "").strip()
-        closing = script_payload.get("closing_statement", "").strip()
-        cta = script_payload.get("cta", "").strip()
-        sign_off = script_payload.get("sign_off", "Class dismissed.").strip()
+        hook = (script_payload.get("hook") or "").strip()
+        story_brief = (script_payload.get("story_brief") or "").strip()
+        why_bizarre = (script_payload.get("why_bizarre") or "").strip()
+        closing = (script_payload.get("closing_statement") or "").strip()
+        cta = (script_payload.get("cta") or "").strip()
+        sign_off = (script_payload.get("sign_off") or "Class dismissed.").strip()
 
         # Build 3 scenes: hook+story | why_bizarre | closing+cta+sign_off
         scenes_text = [
@@ -1767,9 +1770,9 @@ class VideoEngine:
         
         if is_new_style:
             # New prompt style splits the fact into truth_reveal and supporting_fact
-            hook = payload.get("hook", "").strip()
-            context = payload.get("context", "").strip()
-            fact = payload.get("fact", "").strip()
+            hook = (payload.get("hook") or "").strip()
+            context = (payload.get("context") or "").strip()
+            fact = (payload.get("fact") or "").strip()
             
             # Split fact into sentences to align with the SSML breaks
             import re
@@ -1798,7 +1801,7 @@ class VideoEngine:
             if supporting_fact:
                 break_durations.append(0.70)
                 
-            cta_text = payload.get("cta", "").strip()
+            cta_text = (payload.get("cta") or "").strip()
             if cta_text:
                 phrases.append(cta_text)
                 break_durations.append(0.80)
@@ -1806,18 +1809,18 @@ class VideoEngine:
             else:
                 break_durations.append(1.00)
                 
-            phrases.append(payload.get("sign_off", "").strip())
+            phrases.append((payload.get("sign_off") or "").strip())
         else:
             # Legacy formatting
             phrases = [
-                payload.get("hook", "").strip(),
-                payload.get("context", "").strip(),
-                payload.get("fact", "").strip(),
+                (payload.get("hook") or "").strip(),
+                (payload.get("context") or "").strip(),
+                (payload.get("fact") or "").strip(),
             ]
-            cta_text = payload.get("cta", "").strip()
+            cta_text = (payload.get("cta") or "").strip()
             if cta_text:
                 phrases.append(cta_text)
-            phrases.append(payload.get("sign_off", "").strip())
+            phrases.append((payload.get("sign_off") or "").strip())
 
             # Break durations corresponding to SSML break times (one per transition)
             break_durations = [0.55, 0.55, 0.80]
@@ -2230,7 +2233,66 @@ class VideoEngine:
             print(f"[VideoEngine] WARNING: Failed to generate forensic card for {image_path}: {e}")
             return None
 
-    def _create_scene_clip(self, bg_source: Any, card_image: Optional[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, audio_clip: Optional[Any] = None, mid_roll_word_indices: Optional[set] = None, is_last_scene: bool = False) -> 'VideoClip':
+    def _parse_srt_file(self, srt_path: str) -> list:
+        if not os.path.exists(srt_path):
+            return []
+        import re
+        try:
+            with open(srt_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            blocks = []
+            entries = re.split(r'\n\s*\n', content.strip())
+            for entry in entries:
+                lines = [l.strip() for l in entry.strip().split('\n') if l.strip()]
+                if len(lines) >= 3:
+                    times = lines[1]
+                    text = "\n".join(lines[2:])
+                    match = re.match(r'(\d+):(\d+):(\d+),(\d+)\s*-->\s*(\d+):(\d+):(\d+),(\d+)', times)
+                    if match:
+                        h1, m1, s1, ms1, h2, m2, s2, ms2 = map(int, match.groups())
+                        start_ms = ((h1 * 3600 + m1 * 60 + s1) * 1000) + ms1
+                        end_ms = ((h2 * 3600 + m2 * 60 + s2) * 1000) + ms2
+                        blocks.append({
+                            "start_ms": start_ms,
+                            "end_ms": end_ms,
+                            "text": text
+                        })
+            return blocks
+        except Exception as e:
+            print(f"[VideoEngine] Error parsing SRT file {srt_path}: {e}")
+            return []
+
+    def _render_srt_subtitle_block(self, draw: ImageDraw.Draw, font: ImageFont.FreeTypeFont, text: str, y_pos: int = 1450):
+        # Wrap words to fit within max width (960px)
+        max_width = 960
+        wrapped_lines = []
+        
+        # Split by existing newlines first
+        raw_lines = text.split("\n")
+        for raw_line in raw_lines:
+            words = raw_line.split()
+            current_line = []
+            for word in words:
+                test_line = " ".join(current_line + [word])
+                line_w = draw.textlength(test_line, font=font)
+                if line_w <= max_width:
+                    current_line.append(word)
+                else:
+                    if current_line:
+                        wrapped_lines.append(" ".join(current_line))
+                    current_line = [word]
+            if current_line:
+                wrapped_lines.append(" ".join(current_line))
+                
+        line_height = 70
+        for i, line in enumerate(wrapped_lines):
+            line_w = draw.textlength(line, font=font)
+            x = (1080 - line_w) // 2
+            y = y_pos + (i * line_height)
+            # 2px black stroke, white text, no background box
+            draw.text((x, y), line, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
+
+    def _create_scene_clip(self, bg_source: Any, card_image: Optional[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, audio_clip: Optional[Any] = None, mid_roll_word_indices: Optional[set] = None, is_last_scene: bool = False, audio_path: Optional[str] = None) -> 'VideoClip':
         try:
             from moviepy.editor import VideoClip, VideoFileClip
         except ImportError:
@@ -2311,26 +2373,36 @@ class VideoEngine:
             grit_img = grit_img.filter(ImageFilter.GaussianBlur(radius=0.5))
             grit_frames.append(np.array(grit_img))
 
-        # Local word timings calculation for this scene using SSML parser
-        words_info = self._parse_ssml_words_emphasis(text)
-        scene_word_timings = []
-        if words_info and audio_duration > 0:
-            total_chars = sum(len(w_info["word"]) for w_info in words_info)
-            sec_per_char = audio_duration / total_chars if total_chars > 0 else 0.1
-            current_time = delay_offset
-            for w_idx, w_info in enumerate(words_info):
-                w_str = w_info["word"]
-                is_emp = w_info["is_emphasized"]
-                w_dur = len(w_str) * sec_per_char
-                scene_word_timings.append({
-                    "word": w_str,
-                    "start_time": current_time,
-                    "end_time": current_time + w_dur,
-                    "phrase_idx": 0,
-                    "is_mid_roll": bool(mid_roll_word_indices and w_idx in mid_roll_word_indices),
-                    "is_emphasized": is_emp
-                })
-                current_time += w_dur
+        # Load SRT blocks
+        srt_blocks = []
+        if audio_path and os.path.exists(audio_path):
+            srt_path = os.path.splitext(audio_path)[0] + ".srt"
+            if os.path.exists(srt_path):
+                srt_blocks = self._parse_srt_file(srt_path)
+                
+        # Fallback if no SRT file exists
+        if not srt_blocks:
+            words_info = self._parse_ssml_words_emphasis(text)
+            if words_info and audio_duration > 0:
+                total_chars = sum(len(w_info["word"]) for w_info in words_info)
+                sec_per_char = audio_duration / total_chars if total_chars > 0 else 0.1
+                current_time = 0.0
+                scene_word_timings = []
+                for w_idx, w_info in enumerate(words_info):
+                    w_str = w_info["word"]
+                    w_dur = len(w_str) * sec_per_char
+                    scene_word_timings.append({
+                        "word": w_str,
+                        "offset_ms": current_time * 1000.0,
+                        "duration_ms": w_dur * 1000.0
+                    })
+                    current_time += w_dur
+                
+                try:
+                    from tts.subtitle_builder import SubtitleBuilder
+                    srt_blocks = SubtitleBuilder.group_words_into_subtitles(scene_word_timings)
+                except Exception as e:
+                    print(f"[VideoEngine] SubtitleBuilder import failed: {e}")
 
         def make_frame(t):
             if total_duration > 6.0 and t > 5.0:
@@ -2413,7 +2485,6 @@ class VideoEngine:
                 # Conspiracy Redactions over coordinates and frequency
                 show_redaction = True
                 if t >= delay_offset:
-                    # Glitch flash: randomly hide redaction, and permanently hide it 1 second after narration starts
                     if t > delay_offset + 1.0 or random.random() < 0.35:
                         show_redaction = False
                 
@@ -2519,7 +2590,7 @@ class VideoEngine:
                 if new_w > 10 and new_h > 10:
                     scaled_card = card_image.resize((new_w, new_h), Image.Resampling.BILINEAR)
                     px = 540 - new_w // 2
-                    py = 1040 - new_h // 2
+                    py = 900 - new_h // 2
                     fused_img = Image.fromarray(fused_arr)
                     fused_img.paste(scaled_card, (px, py), scaled_card)
                     fused_arr = np.array(fused_img)
@@ -2536,11 +2607,20 @@ class VideoEngine:
                     fused_arr[:, :, 0] = np.roll(fused_arr[:, :, 0], shift_r, axis=1)
 
             # Render Subtitles
-            if t >= delay_offset and scene_word_timings:
-                fused_img = Image.fromarray(fused_arr)
-                draw_subs = ImageDraw.Draw(fused_img)
-                self._render_highlighted_subtitles(draw_subs, sub_font, scene_word_timings, t, style_dict, y_pos)
-                fused_arr = np.array(fused_img)
+            if t >= delay_offset and srt_blocks:
+                t_audio_ms = (t - delay_offset) * 1000.0 + self.subtitle_lookahead_ms
+                active_block = None
+                for b in srt_blocks:
+                    if b["start_ms"] <= t_audio_ms < b["end_ms"]:
+                        active_block = b
+                        break
+                if active_block:
+                    fused_img = Image.fromarray(fused_arr)
+                    draw_subs = ImageDraw.Draw(fused_img)
+                    # Display full subtitle line (not word-by-word) timed to sentence boundaries.
+                    # Position: lower third (not bottom edge — leave 12% margin) -> y_pos=1450.
+                    self._render_srt_subtitle_block(draw_subs, sub_font, active_block["text"], y_pos=1450)
+                    fused_arr = np.array(fused_img)
                 
             return fused_arr
             
@@ -2616,6 +2696,9 @@ class VideoEngine:
         """
         import xml.etree.ElementTree as ET
         import re
+        
+        # Strip bracket cues like [sigh], [whispering], [/whispering] so they are not treated as words in subtitles
+        ssml_text = re.sub(r'\[[\w\s_/-]+\]', '', ssml_text)
         
         # Clean text of basic break tags before wrapping
         cleaned_ssml = ssml_text.replace("&", "&amp;")
@@ -2862,11 +2945,11 @@ class VideoEngine:
             
         return clip
 
-    def _create_starting_bumper(self, audio_duration: float, video_type: str, style_dict: dict = None, text: str = None) -> 'VideoClip':
+    def _create_starting_bumper(self, audio_duration: float, video_type: str, style_dict: dict = None, text: str = None, audio_path: Optional[str] = None) -> 'VideoClip':
         """
         Creates the starting bumper video clip.
         Uses a blueprint video from assets/video_blueprints/starting/ (or static fallback),
-        renders large bold text with word-level highlighted subtitles synced to the narrator.
+        renders large bold text with subtitles synced to the narrator.
         """
         if style_dict is None:
             style_dict = STYLE_PRESETS["blueprint"]
@@ -2910,17 +2993,34 @@ class VideoEngine:
 
         scanline_overlay = self._create_scanline_overlay(1080, 1920, opacity=0.10)
 
-        # Word timings
-        words = text.split()
-        word_timings = []
-        if words and audio_duration > 0:
-            total_chars = sum(len(w) for w in words)
-            sec_per_char = audio_duration / total_chars if total_chars > 0 else 0.1
-            current_time = 0.0
-            for w in words:
-                w_dur = len(w) * sec_per_char
-                word_timings.append({"word": w, "start_time": current_time, "end_time": current_time + w_dur, "phrase_idx": 0})
-                current_time += w_dur
+        # Load SRT blocks
+        srt_blocks = []
+        if audio_path and os.path.exists(audio_path):
+            srt_path = os.path.splitext(audio_path)[0] + ".srt"
+            if os.path.exists(srt_path):
+                srt_blocks = self._parse_srt_file(srt_path)
+
+        # Fallback if no SRT file exists
+        if not srt_blocks and text:
+            words = text.split()
+            if words and audio_duration > 0:
+                total_chars = sum(len(w) for w in words)
+                sec_per_char = audio_duration / total_chars if total_chars > 0 else 0.1
+                current_time = 0.0
+                scene_word_timings = []
+                for w in words:
+                    w_dur = len(w) * sec_per_char
+                    scene_word_timings.append({
+                        "word": w,
+                        "offset_ms": current_time * 1000.0,
+                        "duration_ms": w_dur * 1000.0
+                    })
+                    current_time += w_dur
+                try:
+                    from tts.subtitle_builder import SubtitleBuilder
+                    srt_blocks = SubtitleBuilder.group_words_into_subtitles(scene_word_timings)
+                except Exception as e:
+                    print(f"[VideoEngine] SubtitleBuilder import failed in starting bumper: {e}")
 
         def make_frame(t):
             # Get background frame
@@ -2959,12 +3059,19 @@ class VideoEngine:
             # Grit
             fused_arr = np.clip(fused_arr.astype(np.int16) + grit_arr.astype(np.int16), 0, 255).astype(np.uint8)
 
-            # Render highlighted subtitles centered (y_pos ~800 for bumpers)
-            if word_timings:
-                fused_img = Image.fromarray(fused_arr)
-                draw = ImageDraw.Draw(fused_img)
-                self._render_highlighted_subtitles(draw, bumper_font, word_timings, t, style_dict, y_pos=800, font_px_height=78)
-                fused_arr = np.array(fused_img)
+            # Render subtitles
+            if srt_blocks:
+                t_ms = t * 1000.0 + self.subtitle_lookahead_ms
+                active_block = None
+                for b in srt_blocks:
+                    if b["start_ms"] <= t_ms < b["end_ms"]:
+                        active_block = b
+                        break
+                if active_block:
+                    fused_img = Image.fromarray(fused_arr)
+                    draw = ImageDraw.Draw(fused_img)
+                    self._render_srt_subtitle_block(draw, bumper_font, active_block["text"], y_pos=1450)
+                    fused_arr = np.array(fused_img)
 
             return fused_arr
 
@@ -2980,12 +3087,12 @@ class VideoEngine:
             clip.close = custom_close
         return clip
 
-    def _create_ending_scene(self, audio_duration: float, style_dict: dict = None, text: str = None) -> 'VideoClip':
+    def _create_ending_scene(self, audio_duration: float, style_dict: dict = None, text: str = None, audio_path: Optional[str] = None) -> 'VideoClip':
         """
         Creates the ending bumper (Class Dismissed) video clip.
         Uses a blueprint video from assets/video_blueprints/ending/ (or static fallback),
         renders large bold text: "Subscribe — we expose a new lie EVERY. SINGLE. DAY. CLASS DISMISSED."
-        with word-level highlighted subtitles.
+        with subtitles.
         """
         if style_dict is None:
             style_dict = STYLE_PRESETS["blueprint"]
@@ -3020,17 +3127,34 @@ class VideoEngine:
 
         scanline_overlay = self._create_scanline_overlay(1080, 1920, opacity=0.10)
 
-        # Word timings
-        words = text.split()
-        word_timings = []
-        if words and audio_duration > 0:
-            total_chars = sum(len(w) for w in words)
-            sec_per_char = audio_duration / total_chars if total_chars > 0 else 0.1
-            current_time = 0.0
-            for w in words:
-                w_dur = len(w) * sec_per_char
-                word_timings.append({"word": w, "start_time": current_time, "end_time": current_time + w_dur, "phrase_idx": 0})
-                current_time += w_dur
+        # Load SRT blocks
+        srt_blocks = []
+        if audio_path and os.path.exists(audio_path):
+            srt_path = os.path.splitext(audio_path)[0] + ".srt"
+            if os.path.exists(srt_path):
+                srt_blocks = self._parse_srt_file(srt_path)
+
+        # Fallback if no SRT file exists
+        if not srt_blocks and text:
+            words = text.split()
+            if words and audio_duration > 0:
+                total_chars = sum(len(w) for w in words)
+                sec_per_char = audio_duration / total_chars if total_chars > 0 else 0.1
+                current_time = 0.0
+                scene_word_timings = []
+                for w in words:
+                    w_dur = len(w) * sec_per_char
+                    scene_word_timings.append({
+                        "word": w,
+                        "offset_ms": current_time * 1000.0,
+                        "duration_ms": w_dur * 1000.0
+                    })
+                    current_time += w_dur
+                try:
+                    from tts.subtitle_builder import SubtitleBuilder
+                    srt_blocks = SubtitleBuilder.group_words_into_subtitles(scene_word_timings)
+                except Exception as e:
+                    print(f"[VideoEngine] SubtitleBuilder import failed in ending bumper: {e}")
 
         def make_frame(t):
             if bg_video is not None:
@@ -3053,12 +3177,19 @@ class VideoEngine:
             scanlines = np.roll(scanline_overlay, drift, axis=0)
             fused_arr = (fused_arr * (1 - scanlines)).astype(np.uint8)
 
-            # Render highlighted subtitles centered (y_pos ~800)
-            if word_timings:
-                fused_img = Image.fromarray(fused_arr)
-                draw = ImageDraw.Draw(fused_img)
-                self._render_highlighted_subtitles(draw, bumper_font, word_timings, t, style_dict, y_pos=800, font_px_height=72)
-                fused_arr = np.array(fused_img)
+            # Render subtitles
+            if srt_blocks:
+                t_ms = t * 1000.0 + self.subtitle_lookahead_ms
+                active_block = None
+                for b in srt_blocks:
+                    if b["start_ms"] <= t_ms < b["end_ms"]:
+                        active_block = b
+                        break
+                if active_block:
+                    fused_img = Image.fromarray(fused_arr)
+                    draw = ImageDraw.Draw(fused_img)
+                    self._render_srt_subtitle_block(draw, bumper_font, active_block["text"], y_pos=1450)
+                    fused_arr = np.array(fused_img)
 
             # CRT Power-Off collapse transition in the last 0.2 seconds of the video
             if t >= total_duration - 0.2:
@@ -3229,7 +3360,8 @@ class VideoEngine:
                 audio_duration=audio_durations[0],
                 video_type=video_type,
                 style_dict=st,
-                text=starting_text
+                text=starting_text,
+                audio_path=audio_paths[0]
             )
             starting_audio = audio_clips[0]
             starting_clip = starting_clip.with_audio(starting_audio)
@@ -3265,10 +3397,10 @@ class VideoEngine:
                     style_dict=st,
                     audio_clip=audio_clips[audio_idx],
                     mid_roll_word_indices=None,
-                    is_last_scene=(i == scene_count - 1)
+                    is_last_scene=(i == scene_count - 1),
+                    audio_path=audio_paths[audio_idx]
                 )
-                s_audio = audio_clips[audio_idx].set_start(delay_offset)
-                s_clip = s_clip.with_audio(s_audio)
+                # We do not set the audio on individual content video clips to prevent MoviePy from dropping offsets.
                 scene_clips.append(s_clip)
 
                 s_dur = delay_offset + audio_durations[audio_idx]
@@ -3296,7 +3428,8 @@ class VideoEngine:
             ending_clip = self._create_ending_scene(
                 audio_duration=audio_durations[-1],
                 style_dict=st,
-                text=ending_text
+                text=ending_text,
+                audio_path=audio_paths[-1]
             )
             ending_audio = audio_clips[-1]
             ending_clip = ending_clip.with_audio(ending_audio)
@@ -3321,6 +3454,11 @@ class VideoEngine:
             speaking_blocks.append((ending_start, ending_start + ending_dur))
 
             audio_clips_to_mix = [video_clip.audio]
+            # Mix content scene narration manually to align perfectly with subtitle frames
+            for i in range(scene_count):
+                audio_idx = i + 1
+                s_delay = SCENE_DELAY if i < scene_count - 1 else 0.0
+                audio_clips_to_mix.append(audio_clips[audio_idx].copy().set_start(scene_audio_starts[i] + s_delay))
 
             # ---- SFX Setup ----
             sfx_dir = os.path.join(self.assets_dir, "sfx")
@@ -3648,7 +3786,8 @@ class VideoEngine:
                     audio_duration=audio_durations[0],
                     video_type=video_type,
                     style_dict=st,
-                    text=starting_text
+                    text=starting_text,
+                    audio_path=audio_paths[0]
                 )
                 starting_audio = audio_clips[0]
                 starting_clip = starting_clip.with_audio(starting_audio)
@@ -3657,7 +3796,8 @@ class VideoEngine:
                 ending_clip = self._create_ending_scene(
                     audio_duration=audio_durations[-1],
                     style_dict=st,
-                    text=ending_text
+                    text=ending_text,
+                    audio_path=audio_paths[-1]
                 )
                 ending_audio = audio_clips[-1]
                 ending_clip = ending_clip.with_audio(ending_audio)
@@ -3756,12 +3896,11 @@ class VideoEngine:
                     style_dict=st,
                     audio_clip=content_audio_clips[i],
                     mid_roll_word_indices=mid_roll_word_indices,
-                    is_last_scene=(i == n - 1)
+                    is_last_scene=(i == n - 1),
+                    audio_path=audio_paths[i+1] if len(audio_paths) == n + 2 else audio_paths[i]
                 )
                 
-                # Attach audio (narration starts after delay_offset)
-                scene_audio = content_audio_clips[i].set_start(delay_offset)
-                scene_clip = scene_clip.with_audio(scene_audio)
+                # We do not set the audio on individual content video clips to prevent MoviePy from dropping offsets.
                 content_video_clips.append(scene_clip)
                 
                 # If not the last scene, create transition clip
@@ -3797,6 +3936,12 @@ class VideoEngine:
             speaking_blocks.append((ending_start, ending_start + ending_dur))
             
             audio_clips_to_mix = [video_clip.audio]
+            
+            # Mix content scene narration manually to align perfectly with subtitle frames
+            for i in range(n):
+                timeline = scene_timelines[i]
+                delay_off = 1.75 if timeline["has_card"] else 0.0
+                audio_clips_to_mix.append(content_audio_clips[i].copy().set_start(timeline["start"] + delay_off))
             
             # Load SFX files
             sfx_dir = os.path.join(self.assets_dir, "sfx")

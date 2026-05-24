@@ -1,4 +1,4 @@
-# QA & Security Audit Report: "The Daily Audit" Shorts Pipeline (v4.5.1)
+# QA & Security Audit Report: "The Daily Audit" Shorts Pipeline (v4.6.2)
 
 ## 1. Quality Assurance Summary
 - **Auditor**: QA Agent (`@qa`)
@@ -218,6 +218,33 @@ The pipeline features a multi-tiered fail-safe design:
     - Cinematic Impact Boom: Reduced from 0.70 to 0.25
   - Added the `volumex` fallback method to the `MockClip` class in `app_build/tests/test_pipeline.py` to ensure unit tests remain fully green.
   - Re-ran the test suite and confirmed all 28 unit tests pass successfully.
+
+### 5.16 Audience Retention Overhaul (v4.6.0)
+- **Issue**: The single-shot researcher generated rigid narrative formats, lacked dynamic SSML emotion mappings, visual margins were prone to subtitle overflows/overlap with forensic cards, and subtitle groupings had drift issues.
+- **Severity**: High (Visual Layout & Retention Performance)
+- **Fix Applied**:
+  - Implemented a Two-Pass Researcher Prompt Chain separating Knowledge Decomposition from Scene Narrative building.
+  - Added the Retention Reviewer scoring agent (score >= 7.0 threshold, max 2 retries).
+  - Abolished highlighted subtitle pills, replacing them with sentence-based subtitles in the lower third (`y_pos=1450`) with white fill, 2px outline, and automatic wrapping inside 960px width limits.
+  - Lifted forensic cards up to `cy=900` to guarantee no overlap with the subtitles.
+  - Added SSML style mappings (whispering, excited, calm, lyrical, newscast) with appropriate breaks and hook leading inhales.
+  - Expanded test coverage with `test_retention_overhaul_pipeline` validating the entire new workflow.
+
+### 5.17 Subtitle Sync Delay Lookahead Adjustment (v4.6.1)
+- **Issue**: Subtitles were rendering with a slight visual delay compared to the narrator's spoken voice due to rendering and encoding latency in the video compiling process.
+- **Severity**: Low/Medium (Visual/User Experience)
+- **Fix Applied**:
+  - Implemented a 200ms lookahead shift (`self.subtitle_lookahead_ms = 200.0`) to pull subtitle frame lookups forward.
+  - Added this adjustment to `t_audio_ms` in `_create_scene_clip` and to `t_ms` in both `_create_starting_bumper` and `_create_ending_scene`.
+  - Re-ran the full test suite and verified all 37 tests pass cleanly.
+
+### 5.18 Narration Audio Offset Correction (v4.6.2)
+- **Issue**: Content scene narration audio began playing immediately at the start of Scene 1 and Scene 2, rather than waiting for the 1.75-second card pop delay to complete. This occurred because MoviePy's `concatenate_videoclips` method discarded the subclips' audio start offsets, leading to severe subtitle-voice desynchronization.
+- **Severity**: Medium (Visual/User Experience)
+- **Fix Applied**:
+  - Removed direct `.with_audio` calls on individual content video subclips to prevent MoviePy from dropping their audio start parameters during concatenation.
+  - Manually composited all narration tracks (`starting_audio`, content scene narration, and `ending_audio`) at their mathematically correct starting times on the final `CompositeAudioClip` timeline.
+  - Verified that narration and subtitle blocks are perfectly synchronized across all generated formats and scenes.
 
 ---
 
