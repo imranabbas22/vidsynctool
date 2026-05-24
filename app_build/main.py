@@ -7,6 +7,7 @@ import time
 import argparse
 import random
 import re
+import datetime
 import functools
 from dotenv import load_dotenv
 
@@ -23,11 +24,11 @@ from tiktok_uploader import TikTokUploader
 from data_scraper import DataScraper
 
 CTA_ROTATION = [
-    "Subscribe. Tomorrow, I expose another lie.",
-    "Subscribe — we expose a new lie EVERY. SINGLE. DAY.",
-    "Join the truth-seekers. New declassified files daily.",
-    "Hit subscribe — or keep believing the lies.",
-    "The truth does not declassify itself. Neither does your sub button.",
+    "That was today's audit. Subscribe — the next file is already open.",
+    "Case closed. Follow for tomorrow's declassified truth.",
+    "Audit complete. Subscribe — we expose one lie every single day.",
+    "File sealed. Hit follow — tomorrow's case is worse.",
+    "Subscribe now. The truth does not wait.",
 ]
 
 STYLES = ["blueprint", "blueprint", "chalkboard", "classified", "cyberpunk", "retro_vhs", "terminal"]
@@ -202,15 +203,29 @@ def run_pipeline():
         print("[Main] ERROR: --prompt is required when --type is 'dynamic'")
         sys.exit(1)
 
+    THEME_DAYS = {
+        "Monday": {"type": "myth", "category": "Biology", "name": "Medical Myths Monday"},
+        "Tuesday": {"type": "bizarre", "category": "History", "name": "Time Warp Tuesday"},
+        "Wednesday": {"type": "bizarre", "category": "Biology", "name": "Weird Science Wednesday"},
+        "Thursday": {"type": "myth", "category": "History", "name": "Textbook Lies Thursday"},
+        "Friday": {"type": "myth", "category": "History", "name": "Friday Files"},
+        "Saturday": {"type": "bizarre", "category": "Astronomy", "name": "Strange But True Saturday"},
+        "Sunday": {"type": "myth", "category": "Physics", "name": "Sunday Audit"},
+    }
+
     selected_types = []
+    category_filter = None
     if args.type:
         if args.type == "all":
             selected_types = ["myth", "bizarre"]
         else:
             selected_types = [args.type]
     else:
-        # Default: pick one randomly with weighted probabilities
-        selected_types = [random.choices(["myth", "bizarre"], weights=[0.60, 0.40], k=1)[0]]
+        day_of_week = datetime.datetime.now().strftime("%A")
+        day_info = THEME_DAYS.get(day_of_week, {"type": "myth", "category": None, "name": "General Audit"})
+        selected_types = [day_info["type"]]
+        category_filter = day_info.get("category")
+        print(f"[Main] Theme Days Selection: Today is {day_of_week} ({day_info['name']}) -> Format: {day_info['type'].upper()}, Category Filter: {category_filter}")
     print(f"[Main] Production Target Formats Selected: {[t.upper() for t in selected_types]}")
 
     # Select a random visual style for variety (weighted: blueprint 50%, chalkboard 25%, classified 25%)
@@ -272,7 +287,7 @@ def run_pipeline():
         if video_type == "myth":
             # Retrieve next unused misconception
             try:
-                topic, category, description = ingestion.fetch_unused_misconception(gemini_client=client_ref)
+                topic, category, description = ingestion.fetch_unused_misconception(gemini_client=client_ref, category_filter=category_filter)
                 print(f"[Main] Selected Myth Topic: '{topic}' | Discipline: {category}")
             except Exception as e:
                 print(f"[Main] CRITICAL: Ingestion failed to retrieve misconception: {e}")
@@ -286,8 +301,10 @@ def run_pipeline():
             try:
                 print("[Main] Calling Gemini to construct structured short script...")
                 script_payload = orchestrator.generate_script(topic, category, description)
+                episode_num = ingestion.get_next_episode()
+                script_payload["episode_num"] = episode_num
                 word_count = LLMOrchestrator.calculate_word_count(script_payload)
-                print(f"[Main] Script generated successfully. Word count: {word_count}")
+                print(f"[Main] Script generated successfully. Word count: {word_count} | Episode: {episode_num}")
             except Exception as e:
                 print(f"[Main] ERROR: Script generation failed: {e}")
                 sys.exit(1)
@@ -308,14 +325,19 @@ def run_pipeline():
             # Generate 5 audio files: [starting, s1, s2, s3, ending]
             audio_paths = []
             try:
-                # --- Starting bumper TTS ---
-                starting_text = "Now, bringing you the strangest MYTH that will shock you."
-                starting_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{starting_text}</prosody>"
+                # --- Starting bumper TTS (kept short for retention) ---
+                starting_text = random.choice([
+                    "Classified file just dropped.",
+                    "New audit. Pay attention.",
+                    "Another lie exposed today.",
+                    "Declassified. Watch carefully.",
+                ])
+                starting_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{starting_text}</prosody>"
                 print(f"[Main] Myth Starting Bumper: '{starting_text}'")
 
                 # --- Ending bumper TTS ---
                 ending_text = f"{cta_text} CLASS DISMISSED."
-                ending_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{ending_text}</prosody>"
+                ending_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{ending_text}</prosody>"
                 print(f"[Main] Myth Ending Bumper: '{ending_text}'")
 
                 # Determine raw ssml script
@@ -335,19 +357,22 @@ def run_pipeline():
                     ssml_raw, hook_clean, context_clean, fact_clean
                 )
                 
-                s1_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s1_ssml}</prosody>"
-                s2_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s2_ssml}</prosody>"
-                s3_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s3_ssml}</prosody>"
+                # Per-scene prosody: urgent hook, measured explanation, heavy reveal
+                s1_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.97'>{s1_ssml}</prosody>"
+                s2_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.88'>{s2_ssml}</prosody>"
+                s3_ssml_wrapped = f"<prosody pitch='-1.5st' rate='0.85'>{s3_ssml}</prosody>"
                 
                 print(f"[Main] Myth Scene 1 SSML: {s1_ssml_wrapped}")
                 print(f"[Main] Myth Scene 2 SSML: {s2_ssml_wrapped}")
                 print(f"[Main] Myth Scene 3 SSML: {s3_ssml_wrapped}")
                 
-                # Build 3-element audio paths for content scenes (bumpers are pre-rendered)
+                # Build 5-element audio paths for content scenes and bumpers
                 audio_paths = [
+                    asset_gen.generate_tts_audio(starting_ssml_wrapped, f"tts_{timestamp}_start", is_ssml=True),
                     asset_gen.generate_tts_audio(s1_ssml_wrapped, f"tts_{timestamp}_s1", is_ssml=True),
                     asset_gen.generate_tts_audio(s2_ssml_wrapped, f"tts_{timestamp}_s2", is_ssml=True),
                     asset_gen.generate_tts_audio(s3_ssml_wrapped, f"tts_{timestamp}_s3", is_ssml=True),
+                    asset_gen.generate_tts_audio(ending_ssml_wrapped, f"tts_{timestamp}_end", is_ssml=True),
                 ]
             except Exception as e:
                 print(f"[Main] ERROR: Asset Generator failed to create scene TTS MP3s: {e}")
@@ -373,8 +398,34 @@ def run_pipeline():
                 print(f"[Main] WARNING: Truth foreground image generation failed: {e}. Gracefully falling back to background-only rendering.")
                 image_truth_path = None
 
+            # Generate a dedicated verdict image for scene 3 (the FINAL LESSON card)
+            verdict_image_path = None
+            verdict_prompt = script_payload.get("verdict_visual_prompt", f"Symbolic visual representing the final truth about {topic}, forensic evidence, case closed, official seal")
+            try:
+                verdict_name = f"verdict_reveal_{timestamp}"
+                print(f"[Main] Requesting visual for FINAL VERDICT scene: '{verdict_prompt[:60]}...'")
+                verdict_image_path = asset_gen.generate_background_image(
+                    verdict_prompt,
+                    verdict_name,
+                    aspect_ratio="9:16",
+                    is_blueprint=True,
+                    style_suffix=style_suffix
+                )
+            except Exception as e:
+                print(f"[Main] WARNING: Verdict image generation failed: {e}. Falling back to truth image.")
+                verdict_image_path = image_truth_path or image_myth_path
+
+            # Build 3-element image_paths array with unique images for each scene
+            myth_image_paths = [image_myth_path, image_truth_path or image_myth_path, verdict_image_path or image_truth_path or image_myth_path]
+
             meta = script_payload.get("youtube_metadata", {})
-            title = meta.get("title", f"The Daily Audit: {topic} #Shorts")
+            raw_title = meta.get("title", f"The Daily Audit: {topic} #Shorts")
+            if episode_num is not None:
+                title = f"EP.{episode_num} — {raw_title}"
+            else:
+                title = raw_title
+            if "youtube_metadata" in script_payload:
+                script_payload["youtube_metadata"]["title"] = title
             clean_title = re.sub(r'[<>:"/\\|?*#]', '', title).strip().replace(' ', '_')[:100]
 
             try:
@@ -383,10 +434,10 @@ def run_pipeline():
                 script_payload["cta"] = cta_text
                 script_payload["starting_text"] = starting_text
                 script_payload["ending_text"] = ending_text
-                video_path = video_eng.compile_short(image_myth_path, image_truth_path, audio_paths, script_payload, video_name, category, style=video_style, video_type="myth")
+                video_path = video_eng.compile_short(image_myth_path, image_truth_path, audio_paths, script_payload, video_name, category, style=video_style, video_type="myth", image_paths_override=myth_image_paths)
                 print(f"[Main] Video assembled and saved successfully: {video_path}")
                 # Generate thumbnail using actual video images
-                video_eng.generate_thumbnail(topic, hook_clean, video_name, style=video_style, img_myth_path=image_myth_path, img_truth_path=image_truth_path)
+                video_eng.generate_thumbnail(topic, hook_clean, video_name, style=video_style, img_myth_path=image_myth_path, img_truth_path=image_truth_path, episode_num=episode_num)
             except Exception as e:
                 print(f"[Main] ERROR: Video engine compilation failed: {e}")
                 sys.exit(1)
@@ -399,7 +450,7 @@ def run_pipeline():
         elif video_type == "bizarre":
             # 1. Retrieve bizarre topic
             try:
-                topic, category, description = ingestion.fetch_unused_bizarre_topic(gemini_client=client_ref)
+                topic, category, description = ingestion.fetch_unused_bizarre_topic(gemini_client=client_ref, category_filter=category_filter)
                 print(f"[Main] Selected Anomaly Topic: '{topic}' | Discipline: {category}")
             except Exception as e:
                 print(f"[Main] CRITICAL: Ingestion failed to retrieve bizarre topic: {e}")
@@ -412,7 +463,9 @@ def run_pipeline():
             try:
                 print("[Main] Calling Gemini to construct bizarre fact script payload...")
                 bizarre_payload = orchestrator.generate_bizarre_fact(topic, category)
-                print(f"[Main] Anomaly script generated: '{bizarre_payload.get('hook')}'")
+                episode_num = ingestion.get_next_episode()
+                bizarre_payload["episode_num"] = episode_num
+                print(f"[Main] Anomaly script generated: '{bizarre_payload.get('hook')}' | Episode: {episode_num}")
             except Exception as e:
                 print(f"[Main] ERROR: Anomaly script generation failed: {e}")
                 sys.exit(1)
@@ -426,7 +479,7 @@ def run_pipeline():
                 print(f"[Main] CRITICAL: Failed to initialize asset systems: {e}")
                 sys.exit(1)
 
-            # 4. Scrape 3 images from multiple sources for immersive scenes
+            # 4. Scrape images from multiple sources and use Imagen 4 fallback for any scene that fails
             scene_queries = [
                 bizarre_payload.get("illustration_query", topic),
                 bizarre_payload.get("scene_query_2", "") or bizarre_payload.get("illustration_query", topic),
@@ -440,6 +493,40 @@ def run_pipeline():
                 )
             except Exception as e:
                 print(f"[Main] Scraper failed for bizarre scenes: {e}")
+
+            # If any scene is missing an image, use Imagen 4 to generate one
+            if len(scraped_bizarre_images) < 3:
+                print(f"[Main] Only got {len(scraped_bizarre_images)}/3 scraped images. Generating missing ones with Imagen 4...")
+                for idx in range(3):
+                    if idx >= len(scraped_bizarre_images):
+                        query = scene_queries[idx] if idx < len(scene_queries) else topic
+                        print(f"[Main] Generating Imagen 4 image for scene {idx+1} with query: '{query}'")
+                        try:
+                            gen_path = asset_gen.generate_background_image(
+                                f"Schematic blueprint representation of {query}",
+                                f"bizarre_imagen_{timestamp}_scene{idx}",
+                                aspect_ratio="9:16",
+                                is_blueprint=True,
+                                style_suffix=style_suffix
+                            )
+                            if gen_path:
+                                scraped_bizarre_images.append(gen_path)
+                        except Exception as e:
+                            print(f"[Main] Imagen 4 generation failed for scene {idx}: {e}")
+                            # Last resort: fallback to reuse last available image
+                            if scraped_bizarre_images:
+                                scraped_bizarre_images.append(scraped_bizarre_images[-1])
+                            else:
+                                # Generate a blank blueprint fallback
+                                fallback_path = os.path.join(asset_gen.assets_dir, f"bizarre_fallback_{timestamp}_scene{idx}.png")
+                                try:
+                                    path = asset_gen._render_programmatic_blueprint(query, fallback_path)
+                                    scraped_bizarre_images.append(path)
+                                except Exception:
+                                    from PIL import Image
+                                    os.makedirs(asset_gen.assets_dir, exist_ok=True)
+                                    Image.new("RGB", (1080, 1920), (10, 24, 47)).save(fallback_path)
+                                    scraped_bizarre_images.append(fallback_path)
 
             if not scraped_bizarre_images:
                 fallback_query = scene_queries[0] if scene_queries else topic
@@ -467,14 +554,19 @@ def run_pipeline():
             
             audio_paths = []
             try:
-                # --- Starting bumper TTS ---
-                starting_text = "Now, bringing you the most BIZARRE TRUTH that will shock you."
-                starting_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{starting_text}</prosody>"
+                # --- Starting bumper TTS (kept short for retention) ---
+                starting_text = random.choice([
+                    "Classified file just dropped.",
+                    "New audit. Pay attention.",
+                    "Something bizarre just surfaced.",
+                    "Declassified. Watch carefully.",
+                ])
+                starting_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{starting_text}</prosody>"
                 print(f"[Main] Bizarre Starting Bumper: '{starting_text}'")
 
                 # --- Ending bumper TTS ---
                 ending_text = f"{cta_text} CLASS DISMISSED."
-                ending_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{ending_text}</prosody>"
+                ending_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{ending_text}</prosody>"
                 print(f"[Main] Bizarre Ending Bumper: '{ending_text}'")
 
                 # Determine raw ssml script
@@ -494,18 +586,21 @@ def run_pipeline():
                     ssml_raw, hook_clean, why_bizarre, closing_statement
                 )
                 
-                s1_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s1_ssml}</prosody>"
-                s2_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s2_ssml}</prosody>"
-                s3_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s3_ssml}</prosody>"
+                # Per-scene prosody: urgent hook, measured explanation, heavy reveal
+                s1_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.97'>{s1_ssml}</prosody>"
+                s2_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.88'>{s2_ssml}</prosody>"
+                s3_ssml_wrapped = f"<prosody pitch='-1.5st' rate='0.85'>{s3_ssml}</prosody>"
                 
                 print(f"[Main] Bizarre Scene 1 SSML: {s1_ssml_wrapped}")
                 print(f"[Main] Bizarre Scene 2 SSML: {s2_ssml_wrapped}")
                 print(f"[Main] Bizarre Scene 3 SSML: {s3_ssml_wrapped}")
                 
                 audio_paths = [
+                    asset_gen.generate_tts_audio(starting_ssml_wrapped, f"bizarre_tts_{timestamp}_start", is_ssml=True),
                     asset_gen.generate_tts_audio(s1_ssml_wrapped, f"bizarre_tts_{timestamp}_s1", is_ssml=True),
                     asset_gen.generate_tts_audio(s2_ssml_wrapped, f"bizarre_tts_{timestamp}_s2", is_ssml=True),
                     asset_gen.generate_tts_audio(s3_ssml_wrapped, f"bizarre_tts_{timestamp}_s3", is_ssml=True),
+                    asset_gen.generate_tts_audio(ending_ssml_wrapped, f"bizarre_tts_{timestamp}_end", is_ssml=True),
                 ]
             except Exception as e:
                 print(f"[Main] ERROR: Asset Generator failed to create bizarre scene TTS MP3s: {e}")
@@ -519,11 +614,18 @@ def run_pipeline():
                 "cta": cta_text,
                 "starting_text": starting_text,
                 "ending_text": ending_text,
+                "episode_num": episode_num,
             }
 
             # 7. Compile Anomaly Video with multiple scene images
             meta = bizarre_payload.get("youtube_metadata", {})
-            title = meta.get("title", f"Declassified Anomaly: {topic} #Shorts")
+            raw_title = meta.get("title", f"Declassified Anomaly: {topic} #Shorts")
+            if episode_num is not None:
+                title = f"EP.{episode_num} — {raw_title}"
+            else:
+                title = raw_title
+            if "youtube_metadata" in bizarre_payload:
+                bizarre_payload["youtube_metadata"]["title"] = title
             clean_title = re.sub(r'[<>:"/\\|?*#]', '', title).strip().replace(' ', '_')[:100]
             
             try:
@@ -537,7 +639,7 @@ def run_pipeline():
                 video_eng.generate_thumbnail(
                     topic, hook_clean, video_name, style=video_style,
                     img_myth_path=scraped_bizarre_images[0], img_truth_path=scraped_bizarre_images[-1],
-                    bizarre_mode=True,
+                    bizarre_mode=True, episode_num=episode_num
                 )
             except Exception as e:
                 print(f"[Main] ERROR: Video engine compilation failed: {e}")
@@ -729,6 +831,11 @@ def run_pipeline():
             def _yt_upload():
                 return uploader.upload_short(video_path, title, yt_desc, tags)
             yt_upload_success, yt_video_id = _yt_upload()
+            if yt_upload_success and yt_video_id:
+                comment_hook = script_payload.get("comment_hook", "")
+                if comment_hook:
+                    print(f"[Main] Posting and pinning comment hook: '{comment_hook}'")
+                    uploader.post_and_pin_comment(yt_video_id, comment_hook)
         except Exception as e:
             print(f"[Main] ERROR: YouTube upload subsystem failed: {e}")
 

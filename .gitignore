@@ -50,6 +50,11 @@ Thumbs.db
 .DS_Store
 Desktop.ini
 
+# Planning & project docs
+*_plan.md
+roadmap.md
+growth_projection.md
+
 # Kilo agent state
 .agents/
 state.json

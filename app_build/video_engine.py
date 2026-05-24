@@ -631,6 +631,64 @@ class VideoEngine:
             crackle_samples.append(pop + rumble)
         synthesize_and_save("crackle", crackle_samples)
 
+        # 9. heartbeat.mp3: Sub-bass heartbeat pulse (double beat, ~70 BPM, 2s duration)
+        heartbeat_samples = []
+        cycle_len = int(0.857 * sample_rate)
+        for i in range(int(2.0 * sample_rate)):
+            t = i / sample_rate
+            idx_in_cycle = i % cycle_len
+            t_in_cycle = idx_in_cycle / sample_rate
+            
+            # Pulse 1 (lub) starts at 0.0s, Pulse 2 (dub) starts at 0.15s
+            val = 0.0
+            if 0.0 <= t_in_cycle < 0.15:
+                val = 0.7 * math.sin(2 * math.pi * 50 * t_in_cycle) * math.exp(-20 * t_in_cycle)
+            elif 0.15 <= t_in_cycle < 0.35:
+                t_dub = t_in_cycle - 0.15
+                val = 0.5 * math.sin(2 * math.pi * 55 * t_dub) * math.exp(-20 * t_dub)
+            
+            heartbeat_samples.append(val)
+        synthesize_and_save("heartbeat", heartbeat_samples)
+
+        # 10. ambient_science.mp3: Science lab hum & bubbling (60s)
+        sci_samples = []
+        for i in range(int(60.0 * sample_rate)):
+            t = i / sample_rate
+            hum = 0.5 * math.sin(2 * math.pi * 100 * t)
+            bubble = 0.0
+            if random.random() < 0.0005:
+                bubble = random.uniform(0.1, 0.4) * math.exp(-80 * random.uniform(0.01, 0.05))
+            sci_samples.append(0.8 * hum + 0.2 * bubble)
+        synthesize_and_save("ambient_science", sci_samples)
+
+        # 11. ambient_history.mp3: Wind & distant echo noise (60s)
+        hist_samples = []
+        for i in range(int(60.0 * sample_rate)):
+            t = i / sample_rate
+            noise = random.uniform(-1.0, 1.0)
+            wind_mod = 0.5 + 0.5 * math.sin(2 * math.pi * 0.15 * t + math.sin(2 * math.pi * 0.03 * t))
+            hist_samples.append(0.3 * noise * wind_mod)
+        synthesize_and_save("ambient_history", hist_samples)
+
+        # 12. ambient_space.mp3: Detuned deep space drone (60s)
+        space_samples = []
+        for i in range(int(60.0 * sample_rate)):
+            t = i / sample_rate
+            drone = 0.5 * math.sin(2 * math.pi * 50 * t) + \
+                    0.3 * math.sin(2 * math.pi * 75 * t + 0.5) + \
+                    0.2 * math.sin(2 * math.pi * 110 * t)
+            space_samples.append(drone)
+        synthesize_and_save("ambient_space", space_samples)
+
+        # 13. ambient_tech.mp3: Server room ventilation fan & hum (60s)
+        tech_samples = []
+        for i in range(int(60.0 * sample_rate)):
+            t = i / sample_rate
+            noise = random.uniform(-0.15, 0.15)
+            hum = 0.6 * math.sin(2 * math.pi * 120 * t) + 0.4 * math.sin(2 * math.pi * 60 * t)
+            tech_samples.append(0.7 * noise + 0.3 * hum)
+        synthesize_and_save("ambient_tech", tech_samples)
+
     def _resolve_theme_music(self, category: str) -> Optional[str]:
         """Resolves background music file based on category, falling back to general background music."""
         music_dir = os.path.join(self.assets_dir, "background_music")
@@ -653,7 +711,7 @@ class VideoEngine:
             return random.choice(music_files)
         return None
 
-    def compile_short(self, image_myth_path: str, image_truth_path: str, audio_path: Any, script_payload: Dict[str, Any], output_name: str, category: str = "history", style: str = "blueprint", video_type: str = "myth") -> str:
+    def compile_short(self, image_myth_path: str, image_truth_path: str, audio_path: Any, script_payload: Dict[str, Any], output_name: str, category: str = "history", style: str = "blueprint", video_type: str = "myth", image_paths_override: Optional[List[str]] = None) -> str:
         """
         Compiles the assets into a finished 9:16 vertical MP4 video.
         Applies visual drift scanlines, organic grit, CRT glitch transitions, elastic card pop-ins,
@@ -680,11 +738,14 @@ class VideoEngine:
                 "THE TRUTH",
                 "THE VERDICT"
             ]
-            image_paths = [
-                image_myth_path,
-                image_truth_path or image_myth_path,
-                image_truth_path or image_myth_path
-            ]
+            if image_paths_override and len(image_paths_override) >= 3:
+                image_paths = image_paths_override[:3]
+            else:
+                image_paths = [
+                    image_myth_path,
+                    image_truth_path or image_myth_path,
+                    image_truth_path or image_myth_path
+                ]
             # Build mid_roll word indices from scene 2 text
             mid_roll_hook = (script_payload.get("mid_roll_hook") or "").strip().lower()
             mid_roll_word_indices = None
@@ -715,7 +776,9 @@ class VideoEngine:
                 video_type=video_type,
                 mid_roll_word_indices=mid_roll_word_indices,
                 starting_text=starting_text,
-                ending_text=ending_text
+                ending_text=ending_text,
+                topic=script_payload.get("topic"),
+                episode_num=script_payload.get("episode_num")
             )
 
         st = STYLE_PRESETS.get(style, STYLE_PRESETS["blueprint"])
@@ -1432,7 +1495,9 @@ class VideoEngine:
                 video_type=video_type,
                 mid_roll_word_indices=mid_roll_word_indices,
                 starting_text=starting_text,
-                ending_text=ending_text
+                ending_text=ending_text,
+                topic=script_payload.get("topic"),
+                episode_num=script_payload.get("episode_num")
             )
 
         st = STYLE_PRESETS.get(style, STYLE_PRESETS["blueprint"])
@@ -2084,7 +2149,7 @@ class VideoEngine:
             # Move to next line's y coordinate
             y_pos += line_height
 
-    def generate_thumbnail(self, topic: str, hook: str, output_name: str, style: str = "blueprint", img_myth_path: str = None, img_truth_path: str = None, bizarre_mode: bool = False) -> str:
+    def generate_thumbnail(self, topic: str, hook: str, output_name: str, style: str = "blueprint", img_myth_path: str = None, img_truth_path: str = None, bizarre_mode: bool = False, episode_num: Optional[int] = None) -> str:
         """Generates a thumbnail using actual video images. Supports myth/truth diagonal, bizarre anomaly, and fallback blueprint."""
         from thumbnail_generator import ThumbnailDesigner
         title = hook if hook else topic
@@ -2092,12 +2157,12 @@ class VideoEngine:
         if bizarre_mode:
             img_path = img_myth_path or img_truth_path
             hd = ThumbnailDesigner(width=1280, height=720)
-            thumb = hd.generate_bizarre_thumbnail(bg_image_path=img_path, title_text=title, topic_label=topic)
+            thumb = hd.generate_bizarre_thumbnail(bg_image_path=img_path, title_text=title, topic_label=topic, episode_num=episode_num)
             out_path = os.path.join(self.assets_dir, f"{output_name}_thumb.png")
             thumb.save(out_path, "PNG", optimize=True)
             print(f"[VideoEngine] Bizarre thumbnail (16:9) saved: {out_path}")
             short = ThumbnailDesigner(width=1080, height=1920)
-            thumb_short = short.generate_bizarre_thumbnail(bg_image_path=img_path, title_text=title, topic_label=topic)
+            thumb_short = short.generate_bizarre_thumbnail(bg_image_path=img_path, title_text=title, topic_label=topic, episode_num=episode_num)
             short_out = os.path.join(self.assets_dir, f"{output_name}_thumb_shorts.png")
             thumb_short.save(short_out, "PNG", optimize=True)
             print(f"[VideoEngine] Bizarre thumbnail (9:16) saved: {short_out}")
@@ -2105,12 +2170,12 @@ class VideoEngine:
 
         if img_myth_path and img_truth_path and os.path.exists(img_myth_path) and os.path.exists(img_truth_path):
             hd = ThumbnailDesigner(width=1280, height=720)
-            thumb = hd.generate_from_images(img_myth_path, img_truth_path, title)
+            thumb = hd.generate_from_images(img_myth_path, img_truth_path, title_text=title, topic_label=topic, episode_num=episode_num)
             out_path = os.path.join(self.assets_dir, f"{output_name}_thumb.png")
             thumb.save(out_path, "PNG", optimize=True)
             print(f"[VideoEngine] Diagonal myth/truth thumbnail (16:9) saved: {out_path}")
             short = ThumbnailDesigner(width=1080, height=1920)
-            thumb_short = short.generate_from_images(img_myth_path, img_truth_path, title)
+            thumb_short = short.generate_from_images(img_myth_path, img_truth_path, title_text=title, topic_label=topic, episode_num=episode_num)
             short_out = os.path.join(self.assets_dir, f"{output_name}_thumb_shorts.png")
             thumb_short.save(short_out, "PNG", optimize=True)
             print(f"[VideoEngine] Diagonal myth/truth thumbnail (9:16) saved: {short_out}")
@@ -2175,7 +2240,7 @@ class VideoEngine:
         return out_path
 
     # New scene-based and flashcard-oriented video compilers
-    def _generate_card(self, image_path: str, label_text: str, status_text: str, is_truth: bool, style_dict: dict) -> Optional[Image.Image]:
+    def _generate_card(self, image_path: str, label_text: str, status_text: str, is_truth: bool, style_dict: dict, topic: str = "") -> Optional[Image.Image]:
         if not image_path or not os.path.exists(image_path):
             return None
         try:
@@ -2191,40 +2256,70 @@ class VideoEngine:
             draw_card = ImageDraw.Draw(card_canvas)
             
             # Drop shadow
-            draw_card.rectangle([20, 20, 820, 870], fill=(10, 15, 30, 180))
+            draw_card.rounded_rectangle([20, 20, 820, 870], radius=16, fill=(10, 15, 30, 180))
             
-            # Card outline
+            # Card outline (rounded rectangle for a premium feel)
             outline_color = style_dict["card_truth_outline"] if is_truth else style_dict["card_myth_outline"]
-            draw_card.rectangle([10, 10, 810, 860], fill=style_dict["card_bg"] + (255,), outline=outline_color + (255,), width=4)
+            draw_card.rounded_rectangle([10, 10, 810, 860], radius=16, fill=style_dict["card_bg"] + (255,), outline=outline_color + (255,), width=4)
             
-            # Header band
-            header_bg = style_dict["card_truth_header_bg"] if is_truth else style_dict["card_myth_header_bg"]
-            draw_card.rectangle([14, 14, 806, 90], fill=header_bg + (255,))
+            # Left accent stripe (colored indicator of status)
+            draw_card.rectangle([14, 25, 20, 845], fill=outline_color + (255,))
             
-            # Header text
+            # Header text (drawn cleaner directly on the card background, no bulky header band)
             try:
-                header_font = ImageFont.truetype(self.font_path, 34)
+                header_font = ImageFont.truetype(self.font_path, 28)
             except Exception:
                 header_font = ImageFont.load_default()
                 
-            t_w = draw_card.textlength(label_text, font=header_font)
-            tx = (820 - t_w) // 2
-            ty = 32
-            header_text_color = style_dict["card_truth_header_text"] if is_truth else style_dict["card_myth_header_text"]
-            draw_card.text((tx, ty), label_text, fill=header_text_color + (255,), font=header_font)
+            draw_card.text((34, 30), label_text.upper(), fill=outline_color + (255,), font=header_font)
             
-            # Paste body image
-            inner_img = square_img.resize((778, 742), Image.Resampling.LANCZOS)
-            card_canvas.paste(inner_img, (21, 104))
-            draw_card.rectangle([21, 104, 799, 846], outline=outline_color + (255,), width=2)
+            # Paste body image with rounded corners
+            img_w, img_h = 762, 540
+            inner_img = square_img.resize((img_w, img_h), Image.Resampling.LANCZOS)
             
-            # Tech details
-            draw_card.line([(25, 852), (100, 852)], fill=outline_color + (255,), width=1)
-            draw_card.line([(715, 852), (790, 852)], fill=outline_color + (255,), width=1)
+            # Create rounded corner mask for the inner image
+            mask = Image.new("L", (img_w, img_h), 0)
+            draw_mask = ImageDraw.Draw(mask)
+            draw_mask.rounded_rectangle([0, 0, img_w, img_h], radius=12, fill=255)
+            
+            # Paste using mask
+            card_canvas.paste(inner_img, (34, 85), mask=mask)
+            
+            # Fine outline around the image
+            draw_card.rounded_rectangle([34, 85, 34 + img_w, 85 + img_h], radius=12, outline=outline_color + (80,), width=2)
+            
+            # Topic text
             try:
-                small_font = ImageFont.truetype(self.font_path, 18)
-                draw_card.text((115, 848), status_text, fill=outline_color + (255,), font=small_font)
-                draw_card.text((550, 848), "DEPT OF AUDIT", fill=style_dict["card_myth_header_text"] + (255,), font=small_font)
+                topic_font = ImageFont.truetype(self.font_path, 28)
+                display_topic = (topic or label_text).upper()
+                # Limit length to fit well
+                if len(display_topic) > 36:
+                    display_topic = display_topic[:33] + "..."
+                draw_card.text((34, 650), display_topic, fill=(255, 255, 255, 240), font=topic_font)
+            except Exception:
+                pass
+                
+            # Status dot & label
+            status_y = 698
+            dot_color = (255, 60, 60) if ("DEBUNKED" in status_text.upper() or "ANOMALOUS" in status_text.upper()) else (0, 242, 254)
+            # Draw glowing status dot
+            draw_card.ellipse([34, status_y + 6, 46, status_y + 18], fill=dot_color + (255,))
+            try:
+                status_font = ImageFont.truetype(self.font_path, 20)
+                draw_card.text((56, status_y), status_text.upper(), fill=outline_color + (255,), font=status_font)
+            except Exception:
+                pass
+                
+            # Dashed/Subtle separator
+            sep_y = 742
+            draw_card.line([(34, sep_y), (796, sep_y)], fill=(255, 255, 255, 30), width=1)
+            
+            # Footer metadata (unique case number + channel brand)
+            footer_y = 762
+            case_num = f"CASE #{abs(hash(topic or label_text)) % 9999:04d}"
+            try:
+                footer_font = ImageFont.truetype(self.font_path, 18)
+                draw_card.text((34, footer_y), f"{case_num}  |  THE DAILY AUDIT", fill=(255, 255, 255, 100), font=footer_font)
             except Exception:
                 pass
                 
@@ -2289,6 +2384,8 @@ class VideoEngine:
             line_w = draw.textlength(line, font=font)
             x = (1080 - line_w) // 2
             y = y_pos + (i * line_height)
+            # 4px offset drop shadow (50% opacity black)
+            draw.text((x + 4, y + 4), line, fill=(0, 0, 0, 128), font=font)
             # 2px black stroke, white text, no background box
             draw.text((x, y), line, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
 
@@ -2337,17 +2434,17 @@ class VideoEngine:
             watermark_img = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
             draw_wm = ImageDraw.Draw(watermark_img)
             try:
-                wm_font = ImageFont.truetype(self.font_path, 60)
+                wm_font = ImageFont.truetype(self.font_path, 36)
             except Exception:
                 wm_font = ImageFont.load_default()
-            stamp_txt = "CLASSIFIED AUDIT FILE"
+            stamp_txt = "CLASSIFIED"
             sw = draw_wm.textlength(stamp_txt, font=wm_font)
-            sh = 90
-            stamp_canvas = Image.new("RGBA", (int(sw) + 40, sh), (0, 0, 0, 0))
+            sh = 56
+            stamp_canvas = Image.new("RGBA", (int(sw) + 24, sh), (0, 0, 0, 0))
             draw_stamp = ImageDraw.Draw(stamp_canvas)
-            draw_stamp.rectangle([4, 4, sw + 36, sh - 4], outline=style_dict["watermark_color"] + (140,), width=4)
-            draw_stamp.text((20, 15), stamp_txt, fill=style_dict["watermark_color"] + (140,), font=wm_font)
-            rotated_stamp = stamp_canvas.rotate(25, expand=True, resample=Image.Resampling.BICUBIC)
+            draw_stamp.rectangle([3, 3, sw + 21, sh - 3], outline=style_dict["watermark_color"] + (80,), width=2)
+            draw_stamp.text((12, 10), stamp_txt, fill=style_dict["watermark_color"] + (80,), font=wm_font)
+            rotated_stamp = stamp_canvas.rotate(15, expand=True, resample=Image.Resampling.BICUBIC)
 
         scanline_overlay = self._create_scanline_overlay(1080, 1920, opacity=0.12)
         
@@ -2405,121 +2502,94 @@ class VideoEngine:
                     print(f"[VideoEngine] SubtitleBuilder import failed: {e}")
 
         def make_frame(t):
+            # Scene-specific background parameters (blur, darken factor, and color grading)
+            if scene_idx == 0:
+                base_blur = 6.0
+                darken_f = 0.50
+            elif scene_idx == 1:
+                base_blur = 10.0
+                darken_f = 0.60
+            else:  # Scene 3 (Reveal) / Last scene
+                base_blur = 4.0
+                darken_f = 0.40
+
             if total_duration > 6.0 and t > 5.0:
-                blur_r = max(0.0, 6.0 - 6.0 * (t - 5.0))
+                blur_r = max(0.0, base_blur - base_blur * (t - 5.0))
             else:
-                blur_r = 6.0
+                blur_r = base_blur
 
             if bg_video is not None:
                 bg_dur = bg_video.duration
                 raw_frame = bg_video.get_frame(t % bg_dur)
-                processed_bg = self._process_bg_frame(raw_frame, blur_radius=blur_r)
+                processed_bg = self._process_bg_frame(raw_frame, blur_radius=blur_r, darken_factor=darken_f)
             elif raw_img_pil is not None:
                 img_to_process = np.array(raw_img_pil)
-                processed_bg = self._process_bg_frame(img_to_process, blur_radius=blur_r)
+                processed_bg = self._process_bg_frame(img_to_process, blur_radius=blur_r, darken_factor=darken_f)
             elif base_arr is not None:
                 processed_bg = base_arr.copy()
             else:
                 processed_bg = np.zeros((1920, 1080, 3), dtype=np.uint8)
 
+            # Apply scene-specific color tints (cool blue for scene 2, warm amber for scene 3)
+            if scene_idx == 1:
+                processed_bg = processed_bg.astype(np.int16)
+                processed_bg[:, :, 2] = np.clip(processed_bg[:, :, 2] + 15, 0, 255)
+                processed_bg = processed_bg.astype(np.uint8)
+            elif scene_idx >= 2:
+                processed_bg = processed_bg.astype(np.int16)
+                processed_bg[:, :, 0] = np.clip(processed_bg[:, :, 0] + 20, 0, 255)
+                processed_bg[:, :, 1] = np.clip(processed_bg[:, :, 1] + 10, 0, 255)
+                processed_bg = processed_bg.astype(np.uint8)
+
             zoom_factor = 1.0 + 0.12 * (t / total_duration)
+            shake_x, shake_y = 0, 0
             if is_last_scene and t >= delay_offset:
                 t_audio = t - delay_offset
                 if t_audio < 0.5:
                     extra_zoom = 0.15 * math.sin((t_audio / 0.5) * math.pi)
                     zoom_factor += extra_zoom
+                # Screen shake during the first 0.2 seconds of scene 3 reveal
+                if t_audio < 0.2:
+                    shake_x = random.randint(-4, 4)
+                    shake_y = random.randint(-4, 4)
+
             h, w, c = processed_bg.shape
             new_h, new_w = int(h / zoom_factor), int(w / zoom_factor)
-            top = (h - new_h) // 2
-            left = (w - new_w) // 2
+            top = max(0, min(h - new_h, (h - new_h) // 2 + shake_y))
+            left = max(0, min(w - new_w, (w - new_w) // 2 + shake_x))
             cropped_bg = processed_bg[top:top+new_h, left:left+new_w]
             bg_frame_img = Image.fromarray(cropped_bg).resize((w, h), Image.Resampling.BILINEAR)
             
             draw_bg = ImageDraw.Draw(bg_frame_img)
             
-            # Audio-Reactive Oscilloscope Waveform
-            amplitude = 15.0
-            freq_val = 0.02
-            if audio_clip is not None and t >= delay_offset:
-                t_audio = t - delay_offset
-                if t_audio <= audio_clip.duration:
-                    try:
-                        sample = audio_clip.get_frame(t_audio)
-                        loudness = float(np.max(np.abs(sample)))
-                        if not math.isnan(loudness):
-                            amplitude = 15.0 + 90.0 * loudness
-                            freq_val = 0.02 + 0.04 * loudness
-                    except Exception:
-                        pass
-                        
-            wave_points = []
-            for wx in range(60, 1020, 15):
-                wy = 1580 + int(amplitude * math.sin(wx * freq_val + t * 15) * math.cos(wx * 0.007 - t * 5))
-                wave_points.append((wx, wy))
-            draw_bg.line(wave_points, fill=(0, 242, 254, 180), width=3)
-            
+            # Minimal case identifier (replaces removed HUD clutter: radar, oscilloscope, telemetry, redactions)
             try:
-                wave_font = ImageFont.truetype(self.font_path, 16)
-                draw_bg.text((60, 1535), "AUDIO TELEMETRY / FREQUENCY RESPONSE", fill=(0, 242, 254, 120), font=wave_font)
-            except:
-                pass
-                
-            # Sweeping Radar
-            center_x, center_y = 540, 960
-            radar_radius = 240
-            sweep_angle = t * 2.0
-            for offset_idx, opacity_val in enumerate([255, 140, 70, 30]):
-                angle_offset = sweep_angle - offset_idx * 0.08
-                rx = center_x + int(radar_radius * math.cos(angle_offset))
-                ry = center_y + int(radar_radius * math.sin(angle_offset))
-                draw_bg.line([(center_x, center_y), (rx, ry)], fill=(0, 200 - offset_idx * 40, 220 - offset_idx * 40), width=2)
-
-            # Telemetry text & Conspiracy Redactions
-            try:
-                tel_font = ImageFont.truetype(self.font_path, 18)
-                draw_bg.text((60, 320), f"SYS_OK // ACT_FRQ: {142.8 + math.sin(t)*0.5:.2f} MHz", fill=(0, 242, 254, 120), font=tel_font)
-                draw_bg.text((60, 350), f"SEC_REF: [AX-{int(t * 15) % 100:02d}]", fill=(0, 242, 254, 120), font=tel_font)
-                draw_bg.text((820, 320), f"TIME_ELAPSED: {t:.3f}s", fill=(0, 242, 254, 120), font=tel_font)
-                draw_bg.text((820, 350), "DEPT_AUDIT: LNK-OK", fill=(0, 242, 254, 120), font=tel_font)
-                
-                # Conspiracy Redactions over coordinates and frequency
-                show_redaction = True
-                if t >= delay_offset:
-                    if t > delay_offset + 1.0 or random.random() < 0.35:
-                        show_redaction = False
-                
-                if show_redaction:
-                    # Frequency block
-                    draw_bg.rectangle([240, 320, 360, 342], fill=(10, 15, 30))
-                    # Coordinate block
-                    draw_bg.rectangle([160, 350, 245, 372], fill=(10, 15, 30))
-                    
-                    red_font = ImageFont.truetype(self.font_path, 12)
-                    draw_bg.text((245, 324), "[REDACTED]", fill=(255, 60, 60, 180), font=red_font)
-                    draw_bg.text((165, 354), "[REDACTED]", fill=(255, 60, 60, 180), font=red_font)
-            except:
+                case_font = ImageFont.truetype(self.font_path, 16)
+                case_id = f"CASE #{abs(hash(text)) % 9999:04d}"
+                draw_bg.text((900, 30), case_id, fill=(255, 255, 255, 40), font=case_font)
+            except Exception:
                 pass
 
-            # Watermark slam for Scene 1
+            # Watermark stamp — subtle corner mark for Scene 1
             if scene_idx == 0 and rotated_stamp is not None and 0.4 <= t <= 3.5:
                 t_stamp = t - 0.4
                 if t_stamp < 0.15:
-                    scale = 3.0 - 2.0 * (t_stamp / 0.15)
-                    opacity = int(255 * (t_stamp / 0.15))
+                    scale = 2.0 - 1.0 * (t_stamp / 0.15)
+                    opacity = int(100 * (t_stamp / 0.15))
                 else:
                     scale = 1.0
-                    opacity = 255
+                    opacity = 100
                 rw_s, rh_s = rotated_stamp.size
                 new_w = int(rw_s * scale)
                 new_h = int(rh_s * scale)
                 if new_w > 10 and new_h > 10:
                     scaled_stamp = rotated_stamp.resize((new_w, new_h), Image.Resampling.BILINEAR)
-                    wpx = (1080 - new_w) // 2
-                    wpy = (1920 - new_h) // 2 - 250
-                    if opacity < 255:
-                        r_arr = np.array(scaled_stamp)
-                        r_arr[:, :, 3] = (r_arr[:, :, 3] * (opacity / 255.0)).astype(np.uint8)
-                        scaled_stamp = Image.fromarray(r_arr)
+                    # Bottom-left corner position
+                    wpx = 30
+                    wpy = 1750
+                    r_arr = np.array(scaled_stamp)
+                    r_arr[:, :, 3] = (r_arr[:, :, 3] * (opacity / 255.0)).astype(np.uint8)
+                    scaled_stamp = Image.fromarray(r_arr)
                     bg_frame_img.paste(scaled_stamp, (wpx, wpy), scaled_stamp)
 
             # Scene labels at the top
@@ -2578,22 +2648,31 @@ class VideoEngine:
                     fused_img.paste(mascot_paste, (mx, my), mascot_paste)
                     fused_arr = np.array(fused_img)
 
-            # Elastic Card
-            if card_image is not None and t >= 0.2:
-                t_elapsed = t - 0.2
-                if t_elapsed < 1.0:
-                    s_factor = 1.0 - math.exp(-6 * t_elapsed) * math.cos(12 * t_elapsed)
-                else:
-                    s_factor = 1.0
-                new_w = int(840 * s_factor)
-                new_h = int(890 * s_factor)
-                if new_w > 10 and new_h > 10:
-                    scaled_card = card_image.resize((new_w, new_h), Image.Resampling.BILINEAR)
-                    px = 540 - new_w // 2
-                    py = 900 - new_h // 2
+            # Elastic Card (pop animation) or Static Card (last/verdict scene)
+            if card_image is not None:
+                if is_last_scene:
+                    # Static card for last scene — always fully visible, no elastic pop
+                    scaled_card = card_image.resize((840, 890), Image.Resampling.BILINEAR)
+                    px = 540 - 840 // 2
+                    py = 900 - 890 // 2
                     fused_img = Image.fromarray(fused_arr)
                     fused_img.paste(scaled_card, (px, py), scaled_card)
                     fused_arr = np.array(fused_img)
+                elif t >= 0.2:
+                    t_elapsed = t - 0.2
+                    if t_elapsed < 1.0:
+                        s_factor = 1.0 - math.exp(-6 * t_elapsed) * math.cos(12 * t_elapsed)
+                    else:
+                        s_factor = 1.0
+                    new_w = int(840 * s_factor)
+                    new_h = int(890 * s_factor)
+                    if new_w > 10 and new_h > 10:
+                        scaled_card = card_image.resize((new_w, new_h), Image.Resampling.BILINEAR)
+                        px = 540 - new_w // 2
+                        py = 900 - new_h // 2
+                        fused_img = Image.fromarray(fused_arr)
+                        fused_img.paste(scaled_card, (px, py), scaled_card)
+                        fused_arr = np.array(fused_img)
 
             # Pre-transition cue visual glitch: cued at last 0.15s of the scene
             if not is_last_scene and total_duration - 0.15 <= t <= total_duration:
@@ -2618,13 +2697,52 @@ class VideoEngine:
                     fused_img = Image.fromarray(fused_arr)
                     draw_subs = ImageDraw.Draw(fused_img)
                     # Display full subtitle line (not word-by-word) timed to sentence boundaries.
-                    # Position: lower third (not bottom edge — leave 12% margin) -> y_pos=1450.
-                    self._render_srt_subtitle_block(draw_subs, sub_font, active_block["text"], y_pos=1450)
+                    # Position: lower third — y_pos=1680 for better mobile legibility
+                    self._render_srt_subtitle_block(draw_subs, sub_font, active_block["text"], y_pos=1680)
                     fused_arr = np.array(fused_img)
                 
+            # Subscribe button overlay — subtle pill at 80% through the last scene's audio
+            if is_last_scene and total_duration > 1.0:
+                sub_progress = t / total_duration
+                if sub_progress >= 0.80:
+                    sub_alpha_factor = min(1.0, (sub_progress - 0.80) / 0.08)  # fade in over 8%
+                    btn_w, btn_h = 280, 52
+                    btn_x = (1080 - btn_w) // 2
+                    btn_y = 1780
+                    btn_bg = (255, 60, 60)  # YouTube red
+                    btn_text = "SUBSCRIBE"
+                    if sub_alpha_factor > 0.05:
+                        fused_img = Image.fromarray(fused_arr).convert("RGBA")
+                        overlay = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+                        draw_btn = ImageDraw.Draw(overlay)
+                        draw_btn.rounded_rectangle(
+                            [btn_x, btn_y, btn_x + btn_w, btn_y + btn_h],
+                            radius=26,
+                            fill=btn_bg + (int(220 * sub_alpha_factor),)
+                        )
+                        try:
+                            btn_font = ImageFont.truetype(self.font_path, 26)
+                        except:
+                            btn_font = ImageFont.load_default()
+                        tw = draw_btn.textlength(btn_text, font=btn_font)
+                        tx = btn_x + (btn_w - int(tw)) // 2
+                        ty = btn_y + (btn_h - 32) // 2
+                        draw_btn.text((tx, ty), btn_text, fill=(255, 255, 255, int(255 * sub_alpha_factor)), font=btn_font)
+                        # Bell icon (simple circle)
+                        bell_x = btn_x + 24
+                        bell_y = btn_y + btn_h // 2
+                        draw_btn.ellipse(
+                            [bell_x - 10, bell_y - 10, bell_x + 10, bell_y + 10],
+                            fill=(255, 255, 255, int(180 * sub_alpha_factor))
+                        )
+                        draw_btn.text((bell_x - 4, bell_y - 7), "\uD83D\uDD14", fill=(255, 255, 255, int(220 * sub_alpha_factor)), font=btn_font)
+                        fused_img = Image.alpha_composite(fused_img, overlay).convert("RGB")
+                        fused_arr = np.array(fused_img)
+            
             return fused_arr
             
         clip = VideoClip(make_frame, duration=total_duration)
+        clip.size = (1080, 1920)
         if isinstance(bg_source, str) and bg_source.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')) and bg_video is not None:
             original_close = clip.close
             def custom_close():
@@ -2945,7 +3063,7 @@ class VideoEngine:
             
         return clip
 
-    def _create_starting_bumper(self, audio_duration: float, video_type: str, style_dict: dict = None, text: str = None, audio_path: Optional[str] = None) -> 'VideoClip':
+    def _create_starting_bumper(self, audio_duration: float, video_type: str, style_dict: dict = None, text: str = None, audio_path: Optional[str] = None, episode_num: Optional[int] = None) -> 'VideoClip':
         """
         Creates the starting bumper video clip.
         Uses a blueprint video from assets/video_blueprints/starting/ (or static fallback),
@@ -3059,7 +3177,10 @@ class VideoEngine:
             # Grit
             fused_arr = np.clip(fused_arr.astype(np.int16) + grit_arr.astype(np.int16), 0, 255).astype(np.uint8)
 
-            # Render subtitles
+            # Render subtitles and episode badge
+            fused_img = Image.fromarray(fused_arr)
+            draw = ImageDraw.Draw(fused_img)
+            
             if srt_blocks:
                 t_ms = t * 1000.0 + self.subtitle_lookahead_ms
                 active_block = None
@@ -3068,14 +3189,21 @@ class VideoEngine:
                         active_block = b
                         break
                 if active_block:
-                    fused_img = Image.fromarray(fused_arr)
-                    draw = ImageDraw.Draw(fused_img)
                     self._render_srt_subtitle_block(draw, bumper_font, active_block["text"], y_pos=1450)
-                    fused_arr = np.array(fused_img)
 
+        # Draw episode badge on starting bumper
+            if episode_num is not None:
+                try:
+                    small_font = ImageFont.truetype(self.font_path, 28)
+                    draw.text((40, 1850), f"EP. {episode_num:03d}", fill=(255, 255, 255, 80), font=small_font)
+                except Exception:
+                    pass
+                    
+            fused_arr = np.array(fused_img)
             return fused_arr
 
         clip = VideoClip(make_frame, duration=total_duration)
+        clip.size = (1080, 1920)
         if bg_video is not None:
             original_close = clip.close
             def custom_close():
@@ -3191,10 +3319,10 @@ class VideoEngine:
                     self._render_srt_subtitle_block(draw, bumper_font, active_block["text"], y_pos=1450)
                     fused_arr = np.array(fused_img)
 
-            # CRT Power-Off collapse transition in the last 0.2 seconds of the video
-            if t >= total_duration - 0.2:
-                dt = t - (total_duration - 0.2)
-                norm = min(1.0, dt / 0.2)
+            # CRT Power-Off collapse transition in the last 0.15 seconds of the video
+            if t >= total_duration - 0.15:
+                dt = t - (total_duration - 0.15)
+                norm = min(1.0, dt / 0.15)
                 
                 # Canvas for rendering black background and collapse highlights
                 black_frame = Image.new("RGB", (w, h), (10, 15, 30)) # matching blueprint background tint
@@ -3243,6 +3371,7 @@ class VideoEngine:
             return fused_arr
 
         clip = VideoClip(make_frame, duration=total_duration)
+        clip.size = (1080, 1920)
         if bg_video is not None:
             original_close = clip.close
             def custom_close():
@@ -3352,8 +3481,8 @@ class VideoEngine:
             # Generate N forensic cards
             cards = self._generate_dynamic_cards(imgs, scene_count, st)
 
-            SCENE_DELAY = 1.75
-            TRANSITION_DURATION = 0.5
+            SCENE_DELAY = 0.0
+            TRANSITION_DURATION = 0.3
 
             # ---- Clip 1: Starting Bumper ----
             starting_clip = self._create_starting_bumper(
@@ -3386,7 +3515,7 @@ class VideoEngine:
 
                 s_clip = self._create_scene_clip(
                     bg_source=bg_videos[i],
-                    card_image=cards[i] if i < scene_count - 1 else None,
+                    card_image=cards[i],
                     audio_duration=audio_durations[audio_idx],
                     text=scene_texts[i],
                     delay_offset=delay_offset,
@@ -3703,7 +3832,7 @@ class VideoEngine:
             import gc
             gc.collect()
 
-    def _compile_scene_based_video(self, image_paths: List[str], audio_paths: List[str], scene_texts: List[str], scene_labels: List[str], scene_titles: List[str], output_name: str, category: str, style: str, is_bizarre: bool, video_type: str = "myth", mid_roll_word_indices: Optional[set] = None, starting_text: Optional[str] = None, ending_text: Optional[str] = None) -> str:
+    def _compile_scene_based_video(self, image_paths: List[str], audio_paths: List[str], scene_texts: List[str], scene_labels: List[str], scene_titles: List[str], output_name: str, category: str, style: str, is_bizarre: bool, video_type: str = "myth", mid_roll_word_indices: Optional[set] = None, starting_text: Optional[str] = None, ending_text: Optional[str] = None, topic: Optional[str] = None, episode_num: Optional[int] = None) -> str:
         """
         Compiles a video from 5 audio tracks and 7 video clips:
           [starting bumper] → [scene 1] → [transition 1] → [scene 2] → [transition 2] → [scene 3] → [ending bumper]
@@ -3787,7 +3916,8 @@ class VideoEngine:
                     video_type=video_type,
                     style_dict=st,
                     text=starting_text,
-                    audio_path=audio_paths[0]
+                    audio_path=audio_paths[0],
+                    episode_num=episode_num
                 )
                 starting_audio = audio_clips[0]
                 starting_clip = starting_clip.with_audio(starting_audio)
@@ -3820,25 +3950,32 @@ class VideoEngine:
                     bg_video = fallback_img_path
                 bg_video_clips.append(bg_video)
             
-            # Generate forensic tech cards for all scenes except the last one
+            # Generate forensic tech cards for all scenes (including last verdict scene)
             cards = []
-            for i in range(n - 1):
+            for i in range(n):
                 img_path = image_paths[i] if i < len(image_paths) else image_paths[-1]
                 is_truth = (i > 0)
                 
                 if not is_truth:
-                    label = st["anomaly_label"] if (is_bizarre and category == "bizarre") else st["myth_label"]
-                    status = "STATUS: ANOMALOUS RECORD" if is_bizarre else "STATUS: DEBUNKED MYTH"
+                    if topic:
+                        label = f"EXHIBIT A: {topic.upper()[:32]} MYTH" if not is_bizarre else f"CASE FILE: {topic.upper()[:32]}"
+                    else:
+                        label = st["anomaly_label"] if (is_bizarre and category == "bizarre") else st["myth_label"]
+                    status = "STATUS: DEBUNKED MYTH" if not is_bizarre else "STATUS: ANOMALOUS RECORD"
                 else:
-                    label = st["truth_label"]
-                    status = "STATUS: DECLASSIFIED ANOMALY" if is_bizarre else "STATUS: VERIFIED FACT"
+                    if topic:
+                        label = "EXHIBIT B: THE REALITY" if not is_bizarre else "EXHIBIT B: THE REVEAL"
+                    else:
+                        label = st["truth_label"]
+                    status = "STATUS: VERIFIED FACT" if not is_bizarre else "STATUS: DECLASSIFIED TRUTH"
                     
                 card = self._generate_card(
                     image_path=img_path,
                     label_text=label,
                     status_text=status,
                     is_truth=is_truth,
-                    style_dict=st
+                    style_dict=st,
+                    topic=topic or ""
                 )
                 cards.append(card)
             
@@ -3848,12 +3985,8 @@ class VideoEngine:
             
             for i in range(n):
                 scene_start = current_time
-                if i < n - 1:
-                    # Card scenes have card pop delay of 1.75s
-                    scene_dur = 1.75 + content_durations[i]
-                else:
-                    # Final verdict scene has 0s card pop delay
-                    scene_dur = content_durations[i]
+                # All scenes: narration starts immediately, card pops in during first words
+                scene_dur = content_durations[i]
                     
                 scene_timelines.append({
                     "start": scene_start,
@@ -3864,9 +3997,9 @@ class VideoEngine:
                 # Advance current time by scene duration
                 current_time += scene_dur
                 
-                # Transition delay between content scenes
+                # Transition delay between content scenes (shortened for pacing)
                 if i < n - 1:
-                    current_time += 0.5
+                    current_time += 0.2
                     
             ending_start = current_time
             ending_dur = ending_clip.duration
@@ -3876,10 +4009,11 @@ class VideoEngine:
                 timeline = scene_timelines[i]
                 if timeline["has_card"]:
                     card_image = cards[i]
-                    delay_offset = 1.75
+                    delay_offset = 0.0
                     y_pos = 330
                 else:
-                    card_image = None
+                    # Last scene: use its card as a static overlay (no pop delay)
+                    card_image = cards[-1] if cards else None
                     delay_offset = 0.0
                     y_pos = 1400
                     
@@ -3927,10 +4061,7 @@ class VideoEngine:
             speaking_blocks = [(0.0, starting_dur)]
             for i in range(n):
                 timeline = scene_timelines[i]
-                if timeline["has_card"]:
-                    speech_start = timeline["start"] + 1.75
-                else:
-                    speech_start = timeline["start"]
+                speech_start = timeline["start"]
                 speech_end = timeline["start"] + timeline["duration"]
                 speaking_blocks.append((speech_start, speech_end))
             speaking_blocks.append((ending_start, ending_start + ending_dur))
@@ -3940,8 +4071,7 @@ class VideoEngine:
             # Mix content scene narration manually to align perfectly with subtitle frames
             for i in range(n):
                 timeline = scene_timelines[i]
-                delay_off = 1.75 if timeline["has_card"] else 0.0
-                audio_clips_to_mix.append(content_audio_clips[i].copy().set_start(timeline["start"] + delay_off))
+                audio_clips_to_mix.append(content_audio_clips[i].copy().set_start(timeline["start"]))
             
             # Load SFX files
             sfx_dir = os.path.join(self.assets_dir, "sfx")
@@ -3953,7 +4083,7 @@ class VideoEngine:
             riser_path = os.path.join(sfx_dir, "riser.mp3")
             crackle_path = os.path.join(sfx_dir, "crackle.mp3")
 
-            # A. Watermark Stamp SFX at 0.4s (in starting bumper) and card reveal scenes (index 1 to n-2)
+            # A. Stamp SFX at 0.4s (in starting bumper) and card reveal scenes
             if os.path.exists(stamp_path):
                 try:
                     stamp_clip = AudioFileClip(stamp_path)
@@ -3966,36 +4096,7 @@ class VideoEngine:
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix stamp SFX: {e}")
                     
-            # B. Ticking mechanical clock loop during card scene delays
-            if os.path.exists(tick_path):
-                try:
-                    tick_clip = AudioFileClip(tick_path)
-                    tick_clip = tick_clip.multiply_volume(0.06) if hasattr(tick_clip, "multiply_volume") else tick_clip.volumex(0.06)
-                    for i in range(n):
-                        timeline = scene_timelines[i]
-                        if timeline["has_card"]:
-                            t_tick = timeline["start"]
-                            while t_tick < timeline["start"] + 1.75 - 0.2:
-                                audio_clips_to_mix.append(tick_clip.set_start(t_tick))
-                                t_tick += 0.6
-                    print("[VideoEngine] Mixed ticking mechanical clock loop")
-                except Exception as e:
-                    print(f"[VideoEngine] WARNING: Failed to mix clock ticks: {e}")
-                    
-            # C. Sub-bass riser build-up before card scenes narration
-            if os.path.exists(riser_path):
-                try:
-                    riser_clip = AudioFileClip(riser_path)
-                    riser_clip = riser_clip.multiply_volume(0.15) if hasattr(riser_clip, "multiply_volume") else riser_clip.volumex(0.15)
-                    for i in range(n):
-                        timeline = scene_timelines[i]
-                        if timeline["has_card"]:
-                            audio_clips_to_mix.append(riser_clip.subclip(10.0 - 1.75, 10.0).set_start(timeline["start"]))
-                    print("[VideoEngine] Mixed sub-bass riser build-up SFX")
-                except Exception as e:
-                    print(f"[VideoEngine] WARNING: Failed to mix riser SFX: {e}")
-                    
-            # D. Card Pop SFX at card start times
+            # B. Quick Card Pop SFX at the start of each card scene
             if os.path.exists(pop_path):
                 try:
                     pop_clip = AudioFileClip(pop_path)
@@ -4021,15 +4122,16 @@ class VideoEngine:
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix zap SFX: {e}")
                     
-            # F. Cinematic Impact Boom SFX at the start of Scene 2 truth reveal
+            # F. Cinematic Impact Boom SFX at the start of Scene 3 truth reveal
             if os.path.exists(impact_path):
                 try:
                     impact_clip = AudioFileClip(impact_path)
                     impact_clip = impact_clip.multiply_volume(0.25) if hasattr(impact_clip, "multiply_volume") else impact_clip.volumex(0.25)
                     if n > 1:
-                        timeline_1 = scene_timelines[1]
-                        audio_clips_to_mix.append(impact_clip.set_start(timeline_1["start"] + 1.75))
-                        print(f"[VideoEngine] Mixed impact.mp3 boom SFX at {timeline_1['start'] + 1.75:.2f}s")
+                        # Final content scene (index n-1) is the reveal/verdict
+                        timeline_reveal = scene_timelines[n-1]
+                        audio_clips_to_mix.append(impact_clip.set_start(timeline_reveal["start"]))
+                        print(f"[VideoEngine] Mixed impact.mp3 boom SFX at reveal start: {timeline_reveal['start']:.2f}s")
                 except Exception as e:
                     print(f"[VideoEngine] WARNING: Failed to mix impact SFX: {e}")
 
@@ -4065,6 +4167,23 @@ class VideoEngine:
                         ramp_up = 0.2
                         ramp_down = 0.1
                         
+                        # Silence Beat (pre-reveal tension before scene 3)
+                        if len(scene_timelines) > 2:
+                            s2_end = scene_timelines[1]["start"] + scene_timelines[1]["duration"]
+                            silence_start = s2_end - 0.3
+                            silence_end = s2_end + 0.4
+                            if silence_start <= t_val <= silence_end:
+                                if t_val < s2_end:
+                                    # Ramp down from vol_min to 0.0
+                                    factor = (s2_end - t_val) / 0.3
+                                    return vol_min * factor
+                                else:
+                                    return 0.0
+                            elif silence_end < t_val < silence_end + 0.3:
+                                # Ramp up from 0.0 to vol_min
+                                factor = (t_val - silence_end) / 0.3
+                                return vol_min * factor
+                                
                         for start, end in speaking_blocks:
                             if start <= t_val <= end:
                                 return vol_min
@@ -4104,20 +4223,37 @@ class VideoEngine:
                 except Exception as bg_err:
                     print(f"[VideoEngine] WARNING: Failed to mix background music ({bg_err}).")
                     
-            # Mix background low-frequency hum layer (hum.mp3)
-            hum_path = os.path.join(self.assets_dir, "sfx", "hum.mp3")
-            if os.path.exists(hum_path):
+            # Mix category-specific ambient sound layer (replaces general hum.mp3)
+            category_lower = category.lower()
+            if "biology" in category_lower or "science" in category_lower or "medicine" in category_lower:
+                ambient_name = "ambient_science.mp3"
+                ambient_vol = 0.04
+            elif "history" in category_lower or "archeology" in category_lower or "social" in category_lower:
+                ambient_name = "ambient_history.mp3"
+                ambient_vol = 0.04
+            elif "space" in category_lower or "astronomy" in category_lower or "physics" in category_lower:
+                ambient_name = "ambient_space.mp3"
+                ambient_vol = 0.04
+            elif "tech" in category_lower or "comput" in category_lower:
+                ambient_name = "ambient_tech.mp3"
+                ambient_vol = 0.04
+            else:
+                ambient_name = "hum.mp3"
+                ambient_vol = 0.03
+                
+            ambient_path = os.path.join(self.assets_dir, "sfx", ambient_name)
+            if os.path.exists(ambient_path):
                 try:
-                    hum_clip = AudioFileClip(hum_path)
-                    if hasattr(hum_clip, "subclipped"):
-                        hum_sub = hum_clip.subclipped(0, min(hum_clip.duration, video_clip.duration))
+                    ambient_clip = AudioFileClip(ambient_path)
+                    if hasattr(ambient_clip, "subclipped"):
+                        ambient_sub = ambient_clip.subclipped(0, min(ambient_clip.duration, video_clip.duration))
                     else:
-                        hum_sub = hum_clip.subclip(0, min(hum_clip.duration, video_clip.duration))
-                    hum_sub = hum_sub.multiply_volume(0.12) if hasattr(hum_sub, "multiply_volume") else hum_sub.volumex(0.12)
-                    audio_clips_to_mix.append(hum_sub)
-                    print("[VideoEngine] Mixed low-frequency hum background layer successfully")
-                except Exception as hum_err:
-                    print(f"[VideoEngine] WARNING: Failed to mix low-frequency hum: {hum_err}")
+                        ambient_sub = ambient_clip.subclip(0, min(ambient_clip.duration, video_clip.duration))
+                    ambient_sub = ambient_sub.multiply_volume(ambient_vol) if hasattr(ambient_sub, "multiply_volume") else ambient_sub.volumex(ambient_vol)
+                    audio_clips_to_mix.append(ambient_sub)
+                    print(f"[VideoEngine] Mixed category-specific ambient loop: {ambient_name} (volume={ambient_vol:.2f})")
+                except Exception as ambient_err:
+                    print(f"[VideoEngine] WARNING: Failed to mix ambient hum: {ambient_err}")
 
             mixed_audio = CompositeAudioClip(audio_clips_to_mix)
             video_clip, tmp_files = self._normalize_and_attach_audio(video_clip, mixed_audio, output_name)

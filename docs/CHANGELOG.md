@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.9.0] - 2026-05-25
+
+### Added
+- **Subscribe Button Overlay**: Added a red pill-shaped "SUBSCRIBE" button with bell icon that fades in at 80% through the last (verdict/reveal) scene at y=1780, giving viewers a visual call-to-action during the final moments of the video.
+- **Imagen 4 Fallback for Bizarre Scene Images**: When the Wikipedia scraper returns fewer than 3 images for bizarre content scenes, Imagen 4 now auto-generates blueprint-style images for the missing scenes. Falls back through programmatic rendering to solid-color fill if Imagen also fails.
+- **Dedicated Verdict Image for Myth Pipeline**: The myth pipeline now generates a third unique image via Imagen 4 for the FINAL VERDICT scene (scene 3), using `verdict_visual_prompt` from the script payload. All three myth scenes now have unique flashcard images.
+
+### Changed
+- **Narration Starts During Card Pop Animation (Retention)**: Removed the 1.75s dead-air delay before narration on every card scene. The card still pops in with elastic animation at t=0.2s, but the narrator now speaks immediately. This eliminates ~20% filler time and keeps viewers engaged through the visual reveal.
+- **Transition Gaps Reduced**: Between-scene delays cut from 0.5s → 0.2s (scene-based pipeline) and 0.5s → 0.3s (dynamic pipeline), tightening overall pacing.
+- **CRT Power-Off Collapse: 0.2s → 0.15s**: Faster screen collapse prevents viewers from swiping away during black frames before the CTA.
+- **Subtitles Lowered: y=1450 → y=1680**: Moved subtitles to the natural lower-third position for mobile viewing, no longer overlapping the flashcard card image.
+- **Watermark Stamp Shrunk & Moved**: Reduced text from "CLASSIFIED AUDIT FILE" → "CLASSIFIED" with smaller font (60→36), relocated from center-screen to bottom-left corner (x=30, y=1750), and lowered opacity (255→100). No longer obstructs the flashcard visual.
+- **All Scene Cards Get Unique Images**: Every scene now generates its own dedicated forensic tech card image. The last scene (verdict/reveal) gets a static card overlay instead of bare blurred background video.
+
+### Removed
+- **Ticking Clock Loop SFX**: Removed the mechanical tick SFX that was counting down during the now-eliminated 1.75s card delay dead air.
+- **Sub-bass Riser Buildup SFX**: Removed the pre-naration riser sweep that no longer has dead air to fill.
+- **Heartbeat Pulse SFX**: Removed the sub-bass heartbeat that played during the removed card pop delay.
+- **Leftover dead-code print statement**: Cleaned up a stray heartbeat error print in the pop SFX exception handler.
+
+### Fixed
+- **Black Screen Between Starting Bumper and First Scene**: All VideoClip instances (`_create_starting_bumper`, `_create_scene_clip`, `_create_ending_scene`) now explicitly declare `clip.size = (1080, 1920)`. MoviePy's `VideoClip(make_frame, ...)` didn't automatically report its dimensions, causing `concatenate_videoclips` to insert a brief black frame at stitch boundaries. Every clip now correctly reports 1080×1920 resolution.
+- **Last Scene Missing Flashcard**: `_compile_scene_based_video` now generates forensic tech cards for ALL n scenes (was n-1). The `_create_scene_clip` function renders the last scene's card as a static full-size overlay (no elastic pop) so the verdict/reveal scene has a visual card throughout.
+- **compile_dynamic_video Passing None for Last Scene Card**: Changed `card_image=cards[i] if i < scene_count - 1 else None` to always pass `cards[i]`, fixing the missing card on the dynamic pipeline's last scene.
+
+## [4.8.0] - 2026-05-24
+
+### Added
+- **Thumbnail Designer Overhaul (Fix 3.2)**: Replaced diagonal myth/truth split compositions with a clean, single full-screen base background image in `ThumbnailDesigner` (`thumbnail_generator.py`). Designed a premium 2-line title layout (`_draw_premium_title`) placing the topic name on the top line (white) and the hook word on the bottom line (emphasized in style-specific accent color: red for myths, cyan for bizarre anomalies). Added a corner episode badge showing `EP. ###` in a rounded outline matching the topic style color, and a solid progress-style bottom accent bar. Removed warning triangles and magnifying glass icons to reduce clutter.
+- **YouTube Comment Pinning (Fix 4.2 & 4.1)**: Integrated automatic comment posting and pinning of the Gemini-generated `comment_hook` question to the YouTube Shorts comment section right after a successful video upload via `uploader.post_and_pin_comment` in `main.py`.
+- **Dynamic Bumper Narration & Episode Badges (Fix 3.1)**: Upgraded `main.py` and `main_local.py` to construct a 5-element `audio_paths` list containing starting and ending bumper TTS files. This activates the video engine's dynamic bumpers compilation mode, which dynamically renders the episode number (`EP. ###`) directly on the starting bumper.
+- **Calendar Theme Days Scheduling (Fix 3.4)**: Integrated a dynamic theme days schedule based on the day of the week (e.g. Medical Myths Monday, Time Warp Tuesday) in both `main.py` and `main_local.py` to automatically assign format types (myth vs bizarre) and category filters if no format type is explicitly requested at startup.
+
+## [4.7.0] - 2026-05-24
+
+### Added
+- **Premium Card Redesign (Fix 1.5)**: Replaced database-like rectangle layout in `_generate_card` with a premium rounded outline, colored left accent stripe, rounded corner body image inset (using an RGBA mask), all-caps topic title, status dot indicator (red for debunked/anomalous, cyan for verified/truth), and a custom footer showing the case number (derived from the topic hash) and channel brand.
+- **Topic-Specific Card Labels (Fix 1.4)**: Threaded `topic` into the scene-based video compiler and dynamically set labels (e.g. `EXHIBIT A: {TOPIC} MYTH`) rather than hardcoded presets.
+- **Scene-Specific Color Temperature & Blur (Fix 1.2)**: Programmed `_create_scene_clip` to apply varying blur, darkening, and custom color tints per scene (Scene 1: 6.0 blur, 0.50 dark, neutral; Scene 2: 10.0 blur, 0.60 dark, cool blue tint; Scene 3: 4.0 blur, 0.40 dark, warm amber tint) to enhance visual progression.
+- **Screen Shake on Reveal Zoom Punch (Fix 1.3)**: Added a dynamic 2D random screen shake (offsetting crop parameters by up to 4px) during the first 0.2s of the Scene 3 truth reveal zoom punch.
+- **Silence Beat Ducking & Reveal SFX Alignment (Fix 2.2)**: Implemented a 0.7s background music silence beat (0.3s ramp down at the end of Scene 2, 0.4s hold during transition) before Scene 3, and relocated the sub-bass cinematic impact boom SFX to play precisely at the start of Scene 3 reveal rather than Scene 2.
+- **Drop Shadow Subtitles (Fix 1.1)**: Modified `_render_srt_subtitle_block` to render a 4px offset drop shadow in semi-transparent black before the main white subtitle line is drawn.
+- **The Auditor Persona Prompts (Fix 3.3)**: Updated system instructions in `generate_script` and `generate_bizarre_fact` to enforce "The Auditor" persona — a sharp, confident, slightly irreverent investigator who uses provocative, conversational statements, and updated Scene 1-3 word limits (10-15 words, 20-30 words, and 12-18 words, respectively).
+
 ## [4.6.0] - 2026-05-24
 
 ### Added
