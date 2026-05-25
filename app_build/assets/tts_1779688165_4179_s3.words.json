@@ -1,0 +1,287 @@
+[
+  {
+    "word": "At",
+    "offset_ms": 0.0,
+    "duration_ms": 200.1038961038961
+  },
+  {
+    "word": "all.",
+    "offset_ms": 200.1038961038961,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "What",
+    "offset_ms": 520.3116883116883,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "they",
+    "offset_ms": 840.5194805194805,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "DO",
+    "offset_ms": 1160.7272727272725,
+    "duration_ms": 200.1038961038961
+  },
+  {
+    "word": "do",
+    "offset_ms": 1360.8311688311687,
+    "duration_ms": 200.1038961038961
+  },
+  {
+    "word": "is",
+    "offset_ms": 1560.935064935065,
+    "duration_ms": 200.1038961038961
+  },
+  {
+    "word": "dig",
+    "offset_ms": 1761.0389610389611,
+    "duration_ms": 260.1558441558442
+  },
+  {
+    "word": "shallow",
+    "offset_ms": 2021.1948051948052,
+    "duration_ms": 500.3636363636364
+  },
+  {
+    "word": "holes",
+    "offset_ms": 2521.5584415584417,
+    "duration_ms": 380.2597402597402
+  },
+  {
+    "word": "in",
+    "offset_ms": 2901.818181818182,
+    "duration_ms": 200.1038961038961
+  },
+  {
+    "word": "the",
+    "offset_ms": 3101.922077922078,
+    "duration_ms": 260.1558441558442
+  },
+  {
+    "word": "dirt",
+    "offset_ms": 3362.0779220779223,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "for",
+    "offset_ms": 3682.2857142857147,
+    "duration_ms": 260.1558441558442
+  },
+  {
+    "word": "their",
+    "offset_ms": 3942.4415584415588,
+    "duration_ms": 380.2597402597402
+  },
+  {
+    "word": "nests.",
+    "offset_ms": 4322.701298701299,
+    "duration_ms": 440.31168831168833
+  },
+  {
+    "word": "They",
+    "offset_ms": 4763.012987012987,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "use",
+    "offset_ms": 5083.220779220779,
+    "duration_ms": 260.1558441558442
+  },
+  {
+    "word": "their",
+    "offset_ms": 5343.376623376624,
+    "duration_ms": 380.2597402597402
+  },
+  {
+    "word": "beaks",
+    "offset_ms": 5723.636363636364,
+    "duration_ms": 380.2597402597402
+  },
+  {
+    "word": "to",
+    "offset_ms": 6103.896103896104,
+    "duration_ms": 200.1038961038961
+  },
+  {
+    "word": "turn",
+    "offset_ms": 6304.0,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "the",
+    "offset_ms": 6624.207792207792,
+    "duration_ms": 260.1558441558442
+  },
+  {
+    "word": "eggs,",
+    "offset_ms": 6884.363636363637,
+    "duration_ms": 380.2597402597402
+  },
+  {
+    "word": "so",
+    "offset_ms": 7264.623376623377,
+    "duration_ms": 200.1038961038961
+  },
+  {
+    "word": "from",
+    "offset_ms": 7464.727272727273,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "far",
+    "offset_ms": 7784.935064935065,
+    "duration_ms": 260.1558441558442
+  },
+  {
+    "word": "away,",
+    "offset_ms": 8045.09090909091,
+    "duration_ms": 380.2597402597402
+  },
+  {
+    "word": "it",
+    "offset_ms": 8425.35064935065,
+    "duration_ms": 200.1038961038961
+  },
+  {
+    "word": "just",
+    "offset_ms": 8625.454545454546,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "looks",
+    "offset_ms": 8945.662337662337,
+    "duration_ms": 380.2597402597402
+  },
+  {
+    "word": "like",
+    "offset_ms": 9325.922077922078,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "their",
+    "offset_ms": 9646.12987012987,
+    "duration_ms": 380.2597402597402
+  },
+  {
+    "word": "head",
+    "offset_ms": 10026.38961038961,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "disappears.",
+    "offset_ms": 10346.597402597401,
+    "duration_ms": 740.5714285714286
+  },
+  {
+    "word": "And",
+    "offset_ms": 11087.16883116883,
+    "duration_ms": 260.1558441558442
+  },
+  {
+    "word": "get",
+    "offset_ms": 11347.324675324675,
+    "duration_ms": 260.1558441558442
+  },
+  {
+    "word": "this,",
+    "offset_ms": 11607.48051948052,
+    "duration_ms": 380.2597402597402
+  },
+  {
+    "word": "if",
+    "offset_ms": 11987.74025974026,
+    "duration_ms": 200.1038961038961
+  },
+  {
+    "word": "a",
+    "offset_ms": 12187.844155844155,
+    "duration_ms": 140.05194805194805
+  },
+  {
+    "word": "predator",
+    "offset_ms": 12327.896103896104,
+    "duration_ms": 560.4155844155844
+  },
+  {
+    "word": "is",
+    "offset_ms": 12888.311688311689,
+    "duration_ms": 200.1038961038961
+  },
+  {
+    "word": "close,",
+    "offset_ms": 13088.415584415585,
+    "duration_ms": 440.31168831168833
+  },
+  {
+    "word": "they'll",
+    "offset_ms": 13528.727272727274,
+    "duration_ms": 500.3636363636364
+  },
+  {
+    "word": "just",
+    "offset_ms": 14029.09090909091,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "drop",
+    "offset_ms": 14349.298701298701,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "and",
+    "offset_ms": 14669.506493506493,
+    "duration_ms": 260.1558441558442
+  },
+  {
+    "word": "lie",
+    "offset_ms": 14929.662337662337,
+    "duration_ms": 260.1558441558442
+  },
+  {
+    "word": "completely",
+    "offset_ms": 15189.818181818182,
+    "duration_ms": 680.5194805194805
+  },
+  {
+    "word": "flat,",
+    "offset_ms": 15870.337662337663,
+    "duration_ms": 380.2597402597402
+  },
+  {
+    "word": "trying",
+    "offset_ms": 16250.597402597403,
+    "duration_ms": 440.31168831168833
+  },
+  {
+    "word": "to",
+    "offset_ms": 16690.909090909092,
+    "duration_ms": 200.1038961038961
+  },
+  {
+    "word": "look",
+    "offset_ms": 16891.01298701299,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "like",
+    "offset_ms": 17211.22077922078,
+    "duration_ms": 320.2077922077922
+  },
+  {
+    "word": "a",
+    "offset_ms": 17531.428571428572,
+    "duration_ms": 140.05194805194805
+  },
+  {
+    "word": "weird",
+    "offset_ms": 17671.48051948052,
+    "duration_ms": 380.2597402597402
+  },
+  {
+    "word": "bush.",
+    "offset_ms": 18051.740259740258,
+    "duration_ms": 380.2597402597402
+  }
+]

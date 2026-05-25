@@ -1,0 +1,12 @@
+1
+00:00:00,000 --> 00:00:01,639
+That was today's audit.
+
+2
+00:00:01,639 --> 00:00:04,587
+Subscribe — the next file is already
+open.
+
+3
+00:00:04,587 --> 00:00:05,736
+CLASS DISMISSED.

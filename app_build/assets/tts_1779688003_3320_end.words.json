@@ -1,0 +1,47 @@
+[
+  {
+    "word": "Case",
+    "offset_ms": 0.0,
+    "duration_ms": 393.90476190476187
+  },
+  {
+    "word": "closed.",
+    "offset_ms": 393.90476190476187,
+    "duration_ms": 629.3333333333333
+  },
+  {
+    "word": "Follow",
+    "offset_ms": 1023.2380952380952,
+    "duration_ms": 550.8571428571429
+  },
+  {
+    "word": "for",
+    "offset_ms": 1574.095238095238,
+    "duration_ms": 315.42857142857144
+  },
+  {
+    "word": "tomorrow's",
+    "offset_ms": 1889.5238095238096,
+    "duration_ms": 864.7619047619047
+  },
+  {
+    "word": "declassified",
+    "offset_ms": 2754.285714285714,
+    "duration_ms": 1021.7142857142857
+  },
+  {
+    "word": "truth.",
+    "offset_ms": 3776.0,
+    "duration_ms": 550.8571428571429
+  },
+  {
+    "word": "CLASS",
+    "offset_ms": 4326.857142857143,
+    "duration_ms": 472.38095238095235
+  },
+  {
+    "word": "DISMISSED.",
+    "offset_ms": 4799.238095238095,
+    "duration_ms": 864.7619047619047
+  }
+]

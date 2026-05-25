@@ -437,6 +437,72 @@ def run_pipeline():
                 print(f"[Local] WARNING: Truth foreground image generation failed: {e}. Gracefully falling back to background-only rendering.")
                 image_truth_path = None
 
+            # ── Sprint 7: Visual Variety — Wikipedia scraping + extra Imagen images ──
+            extra_images = []
+            try:
+                from data_scraper import DataScraper
+                scraper = DataScraper()
+                # Build search queries for Wikipedia: topic + related concepts
+                wiki_queries = [topic]
+                if hook_clean:
+                    # Extract key nouns from hook for additional searches
+                    hook_words = [w for w in hook_clean.split() if len(w) > 4]
+                    if hook_words:
+                        wiki_queries.append(' '.join(hook_words[:3]))
+                if fact_clean:
+                    fact_words = [w for w in fact_clean.split() if len(w) > 4]
+                    if fact_words:
+                        wiki_queries.append(' '.join(fact_words[:3]))
+                wiki_images = scraper.fetch_multiple_wikipedia_images(
+                    wiki_queries,
+                    f"wiki_{timestamp}",
+                    max_images=3
+                )
+                extra_images.extend(wiki_images)
+                print(f"[Local] Wikipedia images fetched: {len(wiki_images)}")
+            except ImportError:
+                print("[Local] DataScraper not available — skipping Wikipedia image fetch")
+            except Exception as e:
+                print(f"[Local] Wikipedia image fetch failed: {e}")
+
+            # Generate 1 extra Imagen image for scene 2 context variety
+            extra_imagen_path = None
+            try:
+                extra_img_name = f"context_extra_{timestamp}"
+                extra_prompt = script_payload.get("context_visual_prompt")
+                if not extra_prompt:
+                    extra_prompt = f"Scientific illustration showing {topic}, detailed, realistic, high contrast"
+                extra_imagen_path = asset_gen.generate_background_image(
+                    extra_prompt, extra_img_name,
+                    aspect_ratio="1:1", is_blueprint=False
+                )
+                if extra_imagen_path:
+                    extra_images.append(extra_imagen_path)
+                    print(f"[Local] Extra context image generated: {extra_imagen_path}")
+            except Exception as e:
+                print(f"[Local] Extra image generation failed (non-fatal): {e}")
+
+            # Build image_paths_override: [wiki1, myth_bg, wiki2, extra_imagen, wiki3, truth_fg, ...]
+            image_paths_override = []
+            # Scene 1 (Hook): myth bg + first wiki image
+            if image_myth_path:
+                image_paths_override.append(image_myth_path)
+            # Scene 2 (Context): wiki images + extra imagen
+            for ei in extra_images:
+                image_paths_override.append(ei)
+            # Scene 3 (Verdict): truth foreground — fresh image never seen before
+            if image_truth_path:
+                image_paths_override.append(image_truth_path)
+            # Deduplicate
+            seen = set()
+            image_paths_override_deduped = []
+            for p in image_paths_override:
+                if p and p not in seen:
+                    seen.add(p)
+                    image_paths_override_deduped.append(p)
+            image_paths_override = image_paths_override_deduped
+            print(f"[Local] Total images for video: {len(image_paths_override)} ({image_paths_override})")
+
             meta = script_payload.get("youtube_metadata", {})
             raw_title = meta.get("title", f"The Daily Audit: {topic} #Shorts")
             if episode_num is not None:
@@ -453,7 +519,7 @@ def run_pipeline():
                 script_payload["cta"] = cta_text
                 script_payload["starting_text"] = starting_text
                 script_payload["ending_text"] = ending_text
-                video_path = video_eng.compile_short(image_myth_path, image_truth_path, audio_paths, script_payload, video_name, category, style=video_style, video_type="myth")
+                video_path = video_eng.compile_short(image_myth_path, image_truth_path, audio_paths, script_payload, video_name, category, style=video_style, video_type="myth", image_paths_override=image_paths_override if image_paths_override else None)
                 print(f"[Local] Video assembled and saved successfully: {video_path}")
                 # Generate thumbnail using actual video images
                 video_eng.generate_thumbnail(topic, hook_clean, video_name, style=video_style, img_myth_path=image_myth_path, img_truth_path=image_truth_path, episode_num=episode_num)

@@ -1,0 +1,47 @@
+[
+  {
+    "word": "Subscribe",
+    "offset_ms": 0.0,
+    "duration_ms": 764.0
+  },
+  {
+    "word": "now.",
+    "offset_ms": 764.0,
+    "duration_ms": 384.0
+  },
+  {
+    "word": "The",
+    "offset_ms": 1148.0,
+    "duration_ms": 308.0
+  },
+  {
+    "word": "truth",
+    "offset_ms": 1456.0,
+    "duration_ms": 460.0
+  },
+  {
+    "word": "does",
+    "offset_ms": 1916.0,
+    "duration_ms": 384.0
+  },
+  {
+    "word": "not",
+    "offset_ms": 2300.0,
+    "duration_ms": 308.0
+  },
+  {
+    "word": "wait.",
+    "offset_ms": 2608.0,
+    "duration_ms": 460.0
+  },
+  {
+    "word": "CLASS",
+    "offset_ms": 3068.0,
+    "duration_ms": 460.0
+  },
+  {
+    "word": "DISMISSED.",
+    "offset_ms": 3528.0,
+    "duration_ms": 840.0
+  }
+]

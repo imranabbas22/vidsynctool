@@ -1,0 +1,72 @@
+[
+  {
+    "word": "That",
+    "offset_ms": 0.0,
+    "duration_ms": 343.77142857142854
+  },
+  {
+    "word": "was",
+    "offset_ms": 343.77142857142854,
+    "duration_ms": 277.8285714285714
+  },
+  {
+    "word": "today's",
+    "offset_ms": 621.5999999999999,
+    "duration_ms": 541.6
+  },
+  {
+    "word": "audit.",
+    "offset_ms": 1163.1999999999998,
+    "duration_ms": 475.65714285714284
+  },
+  {
+    "word": "Subscribe",
+    "offset_ms": 1638.8571428571427,
+    "duration_ms": 673.4857142857143
+  },
+  {
+    "word": "\u2014",
+    "offset_ms": 2312.3428571428567,
+    "duration_ms": 145.94285714285712
+  },
+  {
+    "word": "the",
+    "offset_ms": 2458.2857142857138,
+    "duration_ms": 277.8285714285714
+  },
+  {
+    "word": "next",
+    "offset_ms": 2736.114285714285,
+    "duration_ms": 343.77142857142854
+  },
+  {
+    "word": "file",
+    "offset_ms": 3079.8857142857137,
+    "duration_ms": 343.77142857142854
+  },
+  {
+    "word": "is",
+    "offset_ms": 3423.6571428571424,
+    "duration_ms": 211.88571428571427
+  },
+  {
+    "word": "already",
+    "offset_ms": 3635.5428571428565,
+    "duration_ms": 541.6
+  },
+  {
+    "word": "open.",
+    "offset_ms": 4177.142857142857,
+    "duration_ms": 409.7142857142857
+  },
+  {
+    "word": "CLASS",
+    "offset_ms": 4586.857142857142,
+    "duration_ms": 409.7142857142857
+  },
+  {
+    "word": "DISMISSED.",
+    "offset_ms": 4996.5714285714275,
+    "duration_ms": 739.4285714285714
+  }
+]

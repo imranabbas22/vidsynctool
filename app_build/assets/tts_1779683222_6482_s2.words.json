@@ -1,0 +1,87 @@
+[
+  {
+    "word": "So",
+    "offset_ms": 0.0,
+    "duration_ms": 206.9724770642202
+  },
+  {
+    "word": "that",
+    "offset_ms": 206.9724770642202,
+    "duration_ms": 333.9449541284404
+  },
+  {
+    "word": "whole",
+    "offset_ms": 540.9174311926606,
+    "duration_ms": 397.4311926605505
+  },
+  {
+    "word": "three-second",
+    "offset_ms": 938.3486238532112,
+    "duration_ms": 841.8348623853211
+  },
+  {
+    "word": "memory",
+    "offset_ms": 1780.1834862385322,
+    "duration_ms": 460.91743119266056
+  },
+  {
+    "word": "thing?",
+    "offset_ms": 2241.1009174311926,
+    "duration_ms": 460.91743119266056
+  },
+  {
+    "word": "Total",
+    "offset_ms": 2702.018348623853,
+    "duration_ms": 397.4311926605505
+  },
+  {
+    "word": "fabrication.",
+    "offset_ms": 3099.4495412844035,
+    "duration_ms": 841.8348623853211
+  },
+  {
+    "word": "Your",
+    "offset_ms": 3941.2844036697247,
+    "duration_ms": 333.9449541284404
+  },
+  {
+    "word": "goldfish",
+    "offset_ms": 4275.229357798165,
+    "duration_ms": 587.8899082568807
+  },
+  {
+    "word": "absolutely",
+    "offset_ms": 4863.119266055046,
+    "duration_ms": 714.862385321101
+  },
+  {
+    "word": "remembers",
+    "offset_ms": 5577.981651376147,
+    "duration_ms": 651.3761467889908
+  },
+  {
+    "word": "you.",
+    "offset_ms": 6229.357798165138,
+    "duration_ms": 333.9449541284404
+  },
+  {
+    "word": "It's",
+    "offset_ms": 6563.302752293578,
+    "duration_ms": 333.9449541284404
+  },
+  {
+    "word": "probably",
+    "offset_ms": 6897.247706422018,
+    "duration_ms": 587.8899082568807
+  },
+  {
+    "word": "just",
+    "offset_ms": 7485.137614678899,
+    "duration_ms": 333.9449541284404
+  },
+  {
+    "word": "bored.",
+    "offset_ms": 7819.082568807339,
+    "duration_ms": 460.91743119266056
+  }
+]

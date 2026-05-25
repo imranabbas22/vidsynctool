@@ -364,23 +364,33 @@ class VideoEngine:
 
     def _select_starting_blueprint(self, video_type: str) -> Optional[str]:
         """
-        Selects a starting bumper blueprint from assets/video_blueprints/starting/.
-        Filters by 'myth' or 'bizarre' keyword in filename; falls back to any MP4.
-        Returns None if the directory is missing or empty.
+        Selects a starting bumper blueprint from app_build/assets/video_blueprints/starting/.
+        Falls back to any MP4 in the video_blueprints directory if starting/ is empty.
+        Filters by 'myth' or 'bizarre' keyword in filename; returns random if no match.
         """
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        root_start_dir = os.path.join(os.path.dirname(base_dir), "assets", "video_blueprints", "starting")
-        if os.path.exists(root_start_dir) and any(f.endswith(".mp4") for f in os.listdir(root_start_dir)):
-            start_dir = root_start_dir
-        else:
-            start_dir = os.path.join(self.assets_dir, "video_blueprints", "starting")
-            
-        if not os.path.exists(start_dir):
+        # Check app_build/assets/video_blueprints/starting/ first
+        start_dir = os.path.join(self.assets_dir, "video_blueprints", "starting")
+        if not os.path.exists(start_dir) or not any(f.endswith(".mp4") for f in os.listdir(start_dir)):
+            # Fallback: any video in the parent video_blueprints directory
+            blueprint_dir = os.path.join(self.assets_dir, "video_blueprints")
+            if os.path.exists(blueprint_dir):
+                all_mp4 = []
+                for root, dirs, files in os.walk(blueprint_dir):
+                    for f in files:
+                        if f.endswith(".mp4"):
+                            all_mp4.append(os.path.join(root, f))
+                if all_mp4:
+                    keyword = "myth" if video_type == "myth" else "bizarre"
+                    matched = [p for p in all_mp4 if keyword in os.path.basename(p).lower()]
+                    if matched:
+                        return random.choice(matched)
+                    return random.choice(all_mp4)
             return None
+
         files = [f for f in os.listdir(start_dir) if f.endswith(".mp4")]
         if not files:
             return None
-        # Match by video_type keyword
         keyword = "myth" if video_type == "myth" else "bizarre"
         matched = [f for f in files if keyword in f.lower()]
         if matched:
@@ -389,19 +399,29 @@ class VideoEngine:
 
     def _select_ending_blueprint(self) -> Optional[str]:
         """
-        Selects an ending bumper blueprint from assets/video_blueprints/ending/.
+        Selects an ending bumper blueprint from app_build/assets/video_blueprints/ending/.
+        Falls back to any MP4 in the video_blueprints directory if ending/ is empty.
         Prefers files with 'class' or 'dismissed' in the name.
-        Returns None if the directory is missing or empty.
         """
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        root_end_dir = os.path.join(os.path.dirname(base_dir), "assets", "video_blueprints", "ending")
-        if os.path.exists(root_end_dir) and any(f.endswith(".mp4") for f in os.listdir(root_end_dir)):
-            end_dir = root_end_dir
-        else:
-            end_dir = os.path.join(self.assets_dir, "video_blueprints", "ending")
-            
-        if not os.path.exists(end_dir):
+        # Check app_build/assets/video_blueprints/ending/ first
+        end_dir = os.path.join(self.assets_dir, "video_blueprints", "ending")
+        if not os.path.exists(end_dir) or not any(f.endswith(".mp4") for f in os.listdir(end_dir)):
+            # Fallback: any video in the parent video_blueprints directory
+            blueprint_dir = os.path.join(self.assets_dir, "video_blueprints")
+            if os.path.exists(blueprint_dir):
+                all_mp4 = []
+                for root, dirs, files in os.walk(blueprint_dir):
+                    for f in files:
+                        if f.endswith(".mp4"):
+                            all_mp4.append(os.path.join(root, f))
+                if all_mp4:
+                    dismissed = [p for p in all_mp4 if "class" in os.path.basename(p).lower() or "dismissed" in os.path.basename(p).lower()]
+                    if dismissed:
+                        return random.choice(dismissed)
+                    return random.choice(all_mp4)
             return None
+
         files = [f for f in os.listdir(end_dir) if f.endswith(".mp4")]
         if not files:
             return None
@@ -2914,11 +2934,12 @@ class VideoEngine:
 
     # ── End Sprint B ─────────────────────────────────────────────────────
 
-    def _create_scene_clip(self, bg_source: Any, card_image: Optional[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, audio_clip: Optional[Any] = None, mid_roll_word_indices: Optional[set] = None, is_last_scene: bool = False, audio_path: Optional[str] = None,
+    def _create_scene_clip(self, bg_source: Any, card_images: List[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, audio_clip: Optional[Any] = None, mid_roll_word_indices: Optional[set] = None, is_last_scene: bool = False, audio_path: Optional[str] = None,
                             emotion_beats: Optional[list] = None, stamp_text: Optional[str] = None,
                             category: str = "") -> 'VideoClip':
         """
-        Creates a single scene clip with CRT effects, card, subtitles, and mascot.
+        Creates a single scene clip with CRT effects, cards, subtitles, and mascot.
+        card_images: list of pre-rendered card PIL images. If >1, they rotate every 5-7s with crossfade.
         emotion_beats: list of (timestamp, expression_str, duration_s) for Static reactions (Sprint B)
         stamp_text: if set, renders a File Stamp at truth reveal with this text
         category: topic category for themed background overlays (Sprint B)
@@ -3269,13 +3290,38 @@ class VideoEngine:
                         fused_arr = np.array(fused_img)
 
             # Elastic Card (pop animation) or Static Card (last/verdict scene)
-            if card_image is not None:
+            # Multi-card rotation: if >1 card, each gets equal time with crossfade
+            active_card_image = None
+            next_card_image = None
+            fade_progress = 0.0
+            if card_images:
+                num_cards = len(card_images)
+                if num_cards > 1:
+                    card_duration = audio_duration / num_cards
+                    current_card_idx = min(int(t / card_duration), num_cards - 1)
+                    active_card_image = card_images[current_card_idx]
+                    # Crossfade during last 0.3s of each card's slot
+                    card_local_t = t - current_card_idx * card_duration
+                    fade_dur = 0.3
+                    if current_card_idx < num_cards - 1 and card_local_t > card_duration - fade_dur:
+                        fade_progress = (card_local_t - (card_duration - fade_dur)) / fade_dur
+                        next_card_image = card_images[current_card_idx + 1]
+                else:
+                    active_card_image = card_images[0]
+            
+            if active_card_image is not None:
                 if is_last_scene:
                     # Static card for last scene — always fully visible, no elastic pop
-                    scaled_card = card_image.resize((840, 890), Image.Resampling.BILINEAR)
+                    scaled_card = active_card_image.resize((840, 890), Image.Resampling.BILINEAR)
                     px = 540 - 840 // 2
                     py = 900 - 890 // 2
                     fused_img = Image.fromarray(fused_arr)
+                    # Crossfade to next card if applicable
+                    if next_card_image is not None and fade_progress > 0:
+                        scaled_next = next_card_image.resize((840, 890), Image.Resampling.BILINEAR)
+                        blend_arr = np.array(scaled_card).astype(np.float32) * (1 - fade_progress) + \
+                                    np.array(scaled_next).astype(np.float32) * fade_progress
+                        scaled_card = Image.fromarray(blend_arr.astype(np.uint8))
                     fused_img.paste(scaled_card, (px, py), scaled_card)
                     fused_arr = np.array(fused_img)
                 elif t >= 0.2:
@@ -3287,7 +3333,13 @@ class VideoEngine:
                     new_w = int(840 * s_factor)
                     new_h = int(890 * s_factor)
                     if new_w > 10 and new_h > 10:
-                        scaled_card = card_image.resize((new_w, new_h), Image.Resampling.BILINEAR)
+                        scaled_card = active_card_image.resize((new_w, new_h), Image.Resampling.BILINEAR)
+                        # Crossfade to next card
+                        if next_card_image is not None and fade_progress > 0:
+                            scaled_next = next_card_image.resize((new_w, new_h), Image.Resampling.BILINEAR)
+                            blend_arr = np.array(scaled_card).astype(np.float32) * (1 - fade_progress) + \
+                                        np.array(scaled_next).astype(np.float32) * fade_progress
+                            scaled_card = Image.fromarray(blend_arr.astype(np.uint8))
                         px = 540 - new_w // 2
                         py = 900 - new_h // 2
                         fused_img = Image.fromarray(fused_arr)
@@ -3295,7 +3347,7 @@ class VideoEngine:
                         fused_arr = np.array(fused_img)
 
             # ── Sprint 6: Focal Point Vignette — radial gradient follows card position ──
-            if card_image is not None:
+            if active_card_image is not None:
                 # Card center position (540, 900) during elastic animation; static at (540, 900) for last scene
                 vx, vy = 540, 900
                 h_f, w_f = fused_arr.shape[:2]
@@ -3311,7 +3363,7 @@ class VideoEngine:
             SCAN_DURATION = 0.35
             scan_active = False
             scan_progress = 0.0
-            if card_image is not None and not is_last_scene:
+            if active_card_image is not None and not is_last_scene:
                 if 0.2 <= t < 0.2 + SCAN_DURATION:
                     scan_active = True
                     scan_progress = (t - 0.2) / SCAN_DURATION
@@ -3831,6 +3883,70 @@ class VideoEngine:
             
         return clip
 
+    def _apply_crt_effects(self, frame_arr: np.ndarray, t: float, total_duration: float) -> np.ndarray:
+        """Apply CRT monitor VFX for the signature channel look:
+        - Enhanced drifting scanlines (wider, more visible)
+        - Radial vignette (dark edges, subtle barrel shadow)
+        - Chromatic aberration (RGB channel shift at edges)
+        - Random static jitter (micro-displacement)
+        - Phosphor glow (horizontal light bleed)
+        Returns modified numpy array (H, W, 3) uint8.
+        """
+        h, w, c = frame_arr.shape
+        arr = frame_arr.astype(np.float32)
+
+        # 1. Enhanced scanlines (25% opacity, 4px wide, 8px pitch, drifting vertically)
+        scan_drift = int(t * 90) % 8
+        scanline_mask = np.zeros((h, w), dtype=np.float32)
+        for sy in range(scan_drift % 8, h, 8):
+            sy_end = min(sy + 3, h)
+            scanline_mask[sy:sy_end, :] = 0.25  # 25% darkening
+        arr = arr * (1.0 - scanline_mask[:, :, None])
+
+        # 2. Radial vignette (darkens corners with smooth falloff)
+        cx, cy = w / 2, h / 2
+        max_r = np.sqrt(cx**2 + cy**2)
+        yy, xx = np.ogrid[:h, :w]
+        dist = np.sqrt((xx - cx)**2 + (yy - cy)**2) / max_r
+        vignette = np.clip(1.0 - dist**2 * 0.6, 0.35, 1.0)  # 65% dark max at corners
+        arr = arr * vignette[:, :, None]
+
+        # 3. Subtle chromatic aberration (RGB channel shift toward edges)
+        shift_px = max(0, 3 - int(dist.max() * 2))  # more shift at edges
+        if shift_px > 0:
+            arr_shifted = arr.copy()
+            # Red shifts left
+            arr_shifted[:-shift_px, shift_px:, 0] = arr[shift_px:, :-shift_px, 0]
+            # Blue shifts right
+            arr_shifted[shift_px:, :-shift_px, 2] = arr[:-shift_px, shift_px:, 2]
+            blend = np.clip(dist * 0.5, 0, 0.1)[:, :, None]  # stronger at edges
+            arr = arr * (1.0 - blend) + arr_shifted * blend
+
+        # 4. Random static interference (sparkle dots)
+        import random as rnd
+        if rnd.random() < 0.15:  # 15% chance per frame
+            sparkle = np.random.randint(0, 256, (h, w, 3), dtype=np.int32).astype(np.float32)
+            sparkle_mask = np.random.random((h, w, 1)) < 0.003  # 0.3% of pixels
+            arr = np.where(sparkle_mask, sparkle * 0.3 + arr * 0.7, arr)
+
+        # 5. Phosphor glow — horizontal light bleed on bright areas
+        gray = np.mean(arr, axis=2)
+        bright_mask = gray > 180
+        if bright_mask.any():
+            # Horizontal blur (very subtle bloom on bright pixels)
+            blur_kernel = np.ones((1, 5), dtype=np.float32) / 5
+            glow = np.zeros_like(arr)
+            for ch in range(3):
+                channel = arr[:, :, ch]
+                # Simple horizontal blur using convolution
+                blurred = np.zeros_like(channel)
+                for row in range(h):
+                    blurred[row, :] = np.convolve(channel[row, :], blur_kernel[0], mode='same')
+                glow[:, :, ch] = blurred * 0.08  # 8% glow intensity
+            arr = arr + glow
+
+        return np.clip(arr, 0, 255).astype(np.uint8)
+
     def _create_starting_bumper(self, audio_duration: float, video_type: str, style_dict: dict = None, text: str = None, audio_path: Optional[str] = None, episode_num: Optional[int] = None) -> 'VideoClip':
         """
         Creates the starting bumper video clip.
@@ -3938,12 +4054,8 @@ class VideoEngine:
             grit_arr = np.array(grit)
 
             fused_arr = np.array(frame)
-            # Scanlines
-            drift = int(t * 120) % 4
-            scanlines = np.roll(scanline_overlay, drift, axis=0)
-            fused_arr = (fused_arr * (1 - scanlines)).astype(np.uint8)
-            # Grit
-            fused_arr = np.clip(fused_arr.astype(np.int16) + grit_arr.astype(np.int16), 0, 255).astype(np.uint8)
+            # CRT signature VFX (scanlines, vignette, chromatic aberration, static, glow)
+            fused_arr = self._apply_crt_effects(fused_arr, t, total_duration)
 
             # Render subtitles and episode badge
             fused_img = Image.fromarray(fused_arr)
@@ -4069,9 +4181,8 @@ class VideoEngine:
             frame = Image.fromarray(cropped).resize((w, h), Image.Resampling.BILINEAR)
 
             fused_arr = np.array(frame)
-            drift = int(t * 120) % 4
-            scanlines = np.roll(scanline_overlay, drift, axis=0)
-            fused_arr = (fused_arr * (1 - scanlines)).astype(np.uint8)
+            # CRT signature VFX (scanlines, vignette, chromatic aberration, static, glow)
+            fused_arr = self._apply_crt_effects(fused_arr, t, total_duration)
 
             # Render subtitles
             if srt_blocks:
@@ -4723,25 +4834,13 @@ class VideoEngine:
                     bg_video = fallback_img_path
                 bg_video_clips.append(bg_video)
             
-            # Generate forensic tech cards for all scenes (including last verdict scene)
-            cards = []
-            for i in range(n):
-                img_path = image_paths[i] if i < len(image_paths) else image_paths[-1]
-                is_truth = (i > 0)
-                
-                if not is_truth:
-                    if topic:
-                        label = "EXHIBIT A"
-                    else:
-                        label = st["anomaly_label"] if (is_bizarre and category == "bizarre") else st["myth_label"]
-                    status = "STATUS: DEBUNKED MYTH" if not is_bizarre else "STATUS: ANOMALOUS RECORD"
-                else:
-                    if topic:
-                        label = "EXHIBIT B"
-                    else:
-                        label = st["truth_label"]
-                    status = "STATUS: VERIFIED FACT" if not is_bizarre else "STATUS: DECLASSIFIED TRUTH"
-                    
+            # Generate forensic tech cards from ALL available images (grouped per scene for rotation)
+            all_cards = []
+            for i, img_path in enumerate(image_paths):
+                is_truth = (i >= len(image_paths) // 2)  # latter half is truth-side
+                label_letter = chr(65 + i)  # A, B, C, D, E...
+                label = f"EXHIBIT {label_letter}"
+                status = "STATUS: VERIFIED FACT" if is_truth else "STATUS: DEBUNKED MYTH"
                 card = self._generate_card(
                     image_path=img_path,
                     label_text=label,
@@ -4751,7 +4850,19 @@ class VideoEngine:
                     topic=topic or "",
                     add_redactions=(i == 0)
                 )
-                cards.append(card)
+                all_cards.append(card)
+            
+            # Group cards per scene: distribute images evenly across n scenes
+            cards_per_scene = [[] for _ in range(n)]
+            for ci, card in enumerate(all_cards):
+                scene_for_card = min(ci * n // len(all_cards), n - 1) if all_cards else 0
+                if card is not None:
+                    cards_per_scene[scene_for_card].append(card)
+            # Ensure each scene has at least 1 card
+            for si in range(n):
+                if not cards_per_scene[si] and all_cards:
+                    if all_cards[-1] is not None:
+                        cards_per_scene[si].append(all_cards[-1])
             
             # Calculate scene timelines
             scene_timelines = []
@@ -4782,18 +4893,18 @@ class VideoEngine:
             for i in range(n):
                 timeline = scene_timelines[i]
                 if timeline["has_card"]:
-                    card_image = cards[i]
+                    scene_card_images = cards_per_scene[i] if cards_per_scene[i] else None
                     delay_offset = 0.0
                     y_pos = 330
                 else:
-                    # Last scene: use its card as a static overlay (no pop delay)
-                    card_image = cards[-1] if cards else None
+                    # Last scene: use its cards as a static overlay (no pop delay)
+                    scene_card_images = cards_per_scene[-1] if cards_per_scene else None
                     delay_offset = 0.0
                     y_pos = 1400
                     
                 scene_clip = self._create_scene_clip(
                     bg_source=bg_video_clips[i],
-                    card_image=card_image,
+                    card_images=scene_card_images,
                     audio_duration=content_durations[i],
                     text=scene_texts[i],
                     delay_offset=delay_offset,
@@ -4818,7 +4929,7 @@ class VideoEngine:
                 # If not the last scene, create transition clip
                 if i < n - 1:
                     use_burn = random.random() < 0.5
-                    flash_mem = cards[i] if i < len(cards) else None  # previous scene card
+                    flash_mem = all_cards[i] if i < len(all_cards) else None  # previous scene card
                     if use_burn:
                         t_clip = self._create_burn_transition_clip(bg_source=bg_video_clips[i+1], duration=0.75, flash_image=flash_mem)
                         burn_transition_times.append(scene_timelines[i]["start"] + scene_timelines[i]["duration"])

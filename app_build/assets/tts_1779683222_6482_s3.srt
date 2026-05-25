@@ -1,0 +1,15 @@
+1
+00:00:00,000 --> 00:00:01,666
+And here's the kicker...
+
+2
+00:00:01,666 --> 00:00:04,198
+they remember these tasks for MONTHS.
+
+3
+00:00:04,198 --> 00:00:05,063
+Not seconds.
+
+4
+00:00:05,063 --> 00:00:05,592
+Months.

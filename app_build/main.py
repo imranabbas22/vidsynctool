@@ -497,6 +497,45 @@ def run_pipeline():
                 print(f"[Main] WARNING: Truth foreground image generation failed: {e}. Gracefully falling back to background-only rendering.")
                 image_truth_path = None
 
+            # ── Sprint 7: Visual Variety — Wikipedia scraping + context images ──
+            extra_images = []
+            try:
+                from data_scraper import DataScraper
+                scraper = DataScraper()
+                wiki_queries = [topic]
+                if hook_clean:
+                    hook_words = [w for w in hook_clean.split() if len(w) > 4]
+                    if hook_words:
+                        wiki_queries.append(' '.join(hook_words[:3]))
+                if fact_clean:
+                    fact_words = [w for w in fact_clean.split() if len(w) > 4]
+                    if fact_words:
+                        wiki_queries.append(' '.join(fact_words[:3]))
+                wiki_images = scraper.fetch_multiple_wikipedia_images(
+                    wiki_queries, f"wiki_{timestamp}", max_images=3
+                )
+                extra_images.extend(wiki_images)
+                print(f"[Main] Wikipedia images fetched: {len(wiki_images)}")
+            except ImportError:
+                print("[Main] DataScraper not available — skipping Wikipedia image fetch")
+            except Exception as e:
+                print(f"[Main] Wikipedia image fetch failed: {e}")
+
+            # Generate 1 extra Imagen image for scene 2 context variety
+            try:
+                extra_img_name = f"context_extra_{timestamp}"
+                extra_prompt = script_payload.get("context_visual_prompt",
+                    f"Scientific illustration showing {topic}, detailed, realistic, high contrast")
+                extra_path = asset_gen.generate_background_image(
+                    extra_prompt, extra_img_name,
+                    aspect_ratio="1:1", is_blueprint=False
+                )
+                if extra_path:
+                    extra_images.append(extra_path)
+                    print(f"[Main] Extra context image generated: {extra_path}")
+            except Exception as e:
+                print(f"[Main] Extra image generation failed (non-fatal): {e}")
+
             # Generate a dedicated verdict image for scene 3 (the FINAL LESSON card)
             verdict_image_path = None
             verdict_prompt = script_payload.get("verdict_visual_prompt", f"Symbolic visual representing the final truth about {topic}, forensic evidence, case closed, official seal")
@@ -514,8 +553,25 @@ def run_pipeline():
                 print(f"[Main] WARNING: Verdict image generation failed: {e}. Falling back to truth image.")
                 verdict_image_path = image_truth_path or image_myth_path
 
-            # Build 3-element image_paths array with unique images for each scene
-            myth_image_paths = [image_myth_path, image_truth_path or image_myth_path, verdict_image_path or image_truth_path or image_myth_path]
+            # Build image override with Wikipedia + extra images for visual variety
+            myth_image_paths = [image_myth_path] if image_myth_path else []
+            # Insert extra (wiki + Imagen) images for scene 2 variety
+            for ei in extra_images:
+                myth_image_paths.append(ei)
+            # Verdict images (scene 3) — fresh, never seen before
+            if verdict_image_path:
+                myth_image_paths.append(verdict_image_path)
+            if image_truth_path:
+                myth_image_paths.append(image_truth_path)
+            # Deduplicate
+            seen = set()
+            deduped = []
+            for p in myth_image_paths:
+                if p and p not in seen:
+                    seen.add(p)
+                    deduped.append(p)
+            myth_image_paths = deduped
+            print(f"[Main] Total images for video: {len(myth_image_paths)}")
 
             meta = script_payload.get("youtube_metadata", {})
             raw_title = meta.get("title", f"The Daily Audit: {topic} #Shorts")

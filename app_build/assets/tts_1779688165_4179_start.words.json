@@ -1,0 +1,22 @@
+[
+  {
+    "word": "New",
+    "offset_ms": 0.0,
+    "duration_ms": 308.0
+  },
+  {
+    "word": "audit.",
+    "offset_ms": 308.0,
+    "duration_ms": 536.0
+  },
+  {
+    "word": "Pay",
+    "offset_ms": 844.0,
+    "duration_ms": 308.0
+  },
+  {
+    "word": "attention.",
+    "offset_ms": 1152.0,
+    "duration_ms": 840.0
+  }
+]

@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:01,023
+Case closed.
+
+2
+00:00:01,023 --> 00:00:04,327
+Follow for tomorrow's declassified truth.
+
+3
+00:00:04,327 --> 00:00:05,664
+CLASS DISMISSED.
