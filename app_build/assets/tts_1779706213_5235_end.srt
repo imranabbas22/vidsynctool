@@ -1,0 +1,16 @@
+1
+00:00:00,000 --> 00:00:01,515
+That was today's audit.
+
+2
+00:00:01,515 --> 00:00:04,247
+Subscribe — the next file is already
+open.
+
+3
+00:00:04,247 --> 00:00:05,243
+Audit complete.
+
+4
+00:00:05,243 --> 00:00:06,240
+You're welcome.

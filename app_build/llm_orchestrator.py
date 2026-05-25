@@ -10,6 +10,22 @@ from pydantic import BaseModel, Field
 from research_agent import ResearchPlan, ScenePlan
 from dynamic_script import DynamicScriptPayload, SceneContent
 
+# ── Long-Form Script Schema ─────────────────────────────────────────
+class LongChapterSection(BaseModel):
+    title: str = Field(description="Short engaging chapter title (3-6 words, e.g., 'The Origin of the Lie', 'What Science Actually Says')")
+    duration_seconds: int = Field(description="Target duration for this chapter's narration in seconds (45-90s range)")
+    content: str = Field(description="The full narration text for this chapter. Written in simple, clear English. Start with a mini-hook, build understanding step by step, end with a chapter-specific insight that feeds into the next chapter. 60-120 words. No markdown, no SSML. Natural conversational tone like a great teacher explaining to a curious student.")
+    visual_query: str = Field(description="Keyword query for Wikipedia/image search matching this chapter's content. Specific and descriptive (e.g., 'medieval anatomy diagram bloodletting', 'Einstein 1905 paper photoelectric effect')")
+    key_takeaway: str = Field(description="One sentence summary of what the viewer should understand after this chapter. 10-15 words.")
+
+class LongScriptPayload(BaseModel):
+    topic: str = Field(description="The core topic of this long-form educational video")
+    chapters: list[LongChapterSection] = Field(description="8 to 12 chapters that together form a complete 10-minute educational narrative. First chapter hooks, final chapter delivers the climax/reveal. Each chapter builds on the previous one.")
+    climax: str = Field(description="The single most important sentence of the entire video. The moment everything clicks for the viewer. 15-25 words of pure insight.")
+    youtube_title: str = Field(description="Compelling YouTube title for a 10-minute educational video. 40-60 characters. No #Shorts suffix.")
+    youtube_description: str = Field(description="3-4 sentence description summarizing the video's value. Include educational context. End with relevant hashtags: #TheDailyAudit #Education #Science #Debunked")
+    tags: list[str] = Field(description="10-15 SEO tags. Include: 3 broad (education, documentary, debunked), 5 topic-specific, and 2-3 channel tags.")
+
 # Define target schemas for structured JSON response validation
 class YouTubeMetadataSchema(BaseModel):
     title: str = Field(description="A compelling, attention-grabbing YouTube Shorts title ending with #Shorts")
@@ -672,6 +688,99 @@ class LLMOrchestrator:
         
         response = model.generate_content(full_prompt)
         payload = json.loads(response.text)
+        return payload
+
+    # ── Long-Form Script Generation (Gemini 2.5 Pro as Teacher) ──────────
+
+    def generate_long_script(self, topic: str, category: str) -> LongScriptPayload:
+        """
+        Generates a 10-minute long-form educational script using Gemini 2.5 Pro.
+        Acts as a strict-but-clear teacher: researches deeply, explains in simple
+        English, builds understanding step by step, and delivers a climax.
+        Returns a structured LongScriptPayload with 8-12 chapters.
+        """
+        system_instruction = (
+            "You are a world-class educator and researcher — equal parts Carl Sagan and "
+            "your favourite high school teacher who made everything click. "
+            "Your mission: take ONE topic and teach it properly in ~10 minutes.\\n\\n"
+            "RULES:\\n"
+            "1. RESEARCH FIRST — your explanation must be factually absolute. No approximations. "
+            "No 'some scientists think'. The truth is the truth.\\n"
+            "2. SIMPLE ENGLISH — you explain complex ideas like you're talking to a bright 14-year-old. "
+            "Use metaphors. Use analogies. Use everyday language. Never dumb it down — make it clear.\\n"
+            "3. STRICT TEACHER — you respect the audience too much to give them fuzzy answers. "
+            "When a common misconception exists, you address it directly: 'You might have heard X. "
+            "That is wrong. Here is why.'\\n"
+            "4. CHAPTER STRUCTURE — 8 to 12 chapters. Each chapter: "
+            "• 60-120 words of narration (45-90 seconds spoken)\\n"
+            "• Starts with a micro-hook ('Here is where it gets interesting...')\\n"
+            "• Teaches one clear concept step by step\\n"
+            "• Ends with a takeaway that sets up the next chapter\\n"
+            "5. THE CLIMAX — Chapter 8-12 is the payoff. Everything builds to this moment. "
+            "The climax should make the viewer say 'OHHH, now I get it.'\\n"
+            "6. NO LLM TELLS — never say: 'furthermore', 'it is worth noting', 'interestingly', "
+            "'studies show', 'scientists have found', 'research indicates', 'moreover', 'thus'.\\n"
+            "7. PERSONALITY — you have opinions. You are passionate. You get excited about truth. "
+            "Use contractions (it's, don't, can't, you've, here's, that's). "
+            "Sound human, not like Wikipedia.\\n"
+            "8. VISUAL CUES — each chapter needs a visual_query keyword for finding a Wikipedia "
+            "image that matches the content. Be specific.\\n\\n"
+            "OUTPUT STRUCTURE:\\n"
+            "- youtube_title: Compelling 40-60 char title, no #Shorts\\n"
+            "- youtube_description: 3-4 sentences + hashtags\\n"
+            "- tags: 10-15 SEO tags\\n"
+            "- chapters: 8-12 chapters, each with title, duration_seconds (45-90), "
+            "content (60-120 words), visual_query, key_takeaway\\n"
+            "- climax: The single mic-drop sentence. 15-25 words.\\n\\n"
+            "Total video target: ~10 minutes (600 seconds). Total narration: ~1200-1500 words."
+        )
+
+        user_prompt = (
+            f"Topic: {topic}\\n"
+            f"Category: {category}\\n\\n"
+            f"Generate a complete 10-minute long-form educational script for 'The Daily Audit' channel.\\n"
+            f"Research the topic thoroughly. Build understanding step by step. "
+            f"End with a satisfying climax that makes everything click.\\n"
+            f"Return a valid LongScriptPayload with 8-12 chapters."
+        )
+
+        from google.genai import types
+
+        try:
+            print(f"[LLM] Generating long-form script with Gemini 2.5 Pro for topic: '{topic}'...")
+            response = self.client.models.generate_content(
+                model='gemini-2.5-pro',
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    response_schema=LongScriptPayload,
+                    temperature=0.7
+                )
+            )
+            payload = LongScriptPayload.model_validate_json(response.text)
+        except Exception as e:
+            print(f"[LLM] Gemini 2.5 Pro failed: {e}. Falling back to Gemini 2.5 Flash...")
+            response = self.client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json",
+                    response_schema=LongScriptPayload,
+                    temperature=0.7
+                )
+            )
+            payload = LongScriptPayload.model_validate_json(response.text)
+
+        total_words = sum(len(c.content.split()) for c in payload.chapters)
+        total_seconds = sum(c.duration_seconds for c in payload.chapters)
+        print(f"[LLM] Long-form script generated: {len(payload.chapters)} chapters, "
+              f"{total_words} words, ~{total_seconds//60}:{total_seconds%60:02d} target duration")
+        for i, ch in enumerate(payload.chapters):
+            print(f"[LLM]   Ch.{i+1}: '{ch.title}' ({ch.duration_seconds}s, "
+                  f"{len(ch.content.split())} words)")
+
         return payload
 
     @staticmethod

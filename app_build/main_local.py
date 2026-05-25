@@ -234,7 +234,7 @@ def run_pipeline():
     """Executes the Shorts generation pipeline for local testing (no uploads, no topic retirement)."""
     print("=" * 80)
     print("   STARTING LOCAL TEST PIPELINE: THE DAILY AUDIT SHORTS NETWORK")
-    print("   (Uploads disabled — topics are NOT retired from the database)")
+    print("   (Uploads disabled — topics ARE retired to prevent duplicate picks)")
     print("=" * 80)
 
     # 0. Parse Command Line Arguments for Video Type
@@ -333,7 +333,8 @@ def run_pipeline():
                 print(f"[Local] CRITICAL: Ingestion failed to retrieve misconception: {e}")
                 sys.exit(1)
 
-            # NOTE: Topic is NOT reserved in the database — local testing only
+            # Immediately reserve topic to prevent re-selection if pipeline crashes
+            ingestion.log_uploaded_topic(topic, "")
 
             # Generate structured script payload from Gemini
             script_payload = None
@@ -545,7 +546,8 @@ def run_pipeline():
                 print(f"[Local] CRITICAL: Ingestion failed to retrieve bizarre topic: {e}")
                 sys.exit(1)
 
-            # NOTE: Topic is NOT reserved in the database — local testing only
+            # Immediately reserve topic to prevent re-selection if pipeline crashes
+            ingestion.log_uploaded_topic(topic, "")
 
             # 2. Generate structured script payload from Gemini
             try:
@@ -867,7 +869,7 @@ def run_pipeline():
         # LOCAL TEST MODE: No uploads, no topic retirement
         # =========================================================================
         print(f"[Local] Local test video saved at: {video_path}")
-        print(f"[Local] Topic '{topic}' was NOT retired — it remains available for future runs.")
+        print(f"[Local] Topic '{topic}' has been reserved and will not be reused by main.py.")
 
         print("\n" + "=" * 80)
         print(f"   LOCAL TEST CYCLE COMPLETED SUCCESSFULLY FOR FORMAT: {video_type.upper()}")
