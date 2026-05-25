@@ -228,39 +228,10 @@ class VideoEngine:
 
     def _generate_mascot(self) -> Image.Image:
         """
-        Draws the "Audit Agent" — an 80×100px RGBA magnifying glass with eyes.
-        Returns a pre-rendered PIL Image for compositing into video frames.
+        Renders the Static mascot — a living CRT noise cloud with glowing eyes.
+        Returns an RGBA PIL Image for compositing as easter egg.
         """
-        canvas = Image.new("RGBA", (80, 100), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(canvas)
-
-        # Outer glow (slightly larger cyan circle, semi-transparent)
-        draw.ellipse([2, 2, 66, 66], fill=(0, 242, 254, 40))
-
-        # Lens outer ring (thick steel-cyan circle)
-        draw.ellipse([6, 6, 62, 62], outline=(0, 200, 255, 200), width=3)
-
-        # Lens inner glass (subtle dark blue tint fill)
-        draw.ellipse([10, 10, 58, 58], fill=(0, 30, 60, 100))
-
-        # Eyes (two white dots, slightly different sizes for character)
-        draw.ellipse([24, 26, 30, 32], fill=(255, 255, 255, 230))
-        draw.ellipse([38, 26, 44, 32], fill=(255, 255, 255, 230))
-
-        # Tiny smile arc
-        draw.arc([28, 34, 42, 46], start=0, end=180, fill=(0, 200, 255, 180), width=2)
-
-        # Handle (rectangle extending downward from lens bottom-centre)
-        hx = (80 - 6) // 2
-        draw.rectangle([hx, 64, hx + 6, 64 + 26], fill=(40, 50, 70, 220))
-
-        # Handle crossbar (small horizontal bar at bottom)
-        bx = (80 - 20) // 2
-        draw.rectangle([bx, 64 + 26 - 2, bx + 20, 64 + 26 + 2], fill=(40, 50, 70, 220))
-
-        # Subtle Gaussian blur to soften edges
-        canvas = canvas.filter(ImageFilter.GaussianBlur(radius=0.5))
-        return canvas
+        return self._render_static(size=70, expression="neutral")
 
     def _select_blueprint_video(self, search_text: str) -> Optional[str]:
         """
@@ -1125,7 +1096,13 @@ class VideoEngine:
             fused_arr = np.array(bg_frame_img)
             
             # 2. Scrolling Scanline Drift: shift the scanlines overlay vertically based on time
-            drift_offset = int(t * 120) % 4
+            drift_base_speed = 120
+            # Power surge: triple scanline drift speed for 0.5s on truth reveal (Scene 3)
+            if is_last_scene and t >= delay_offset:
+                surge_t = t - delay_offset
+                if surge_t < 0.5:
+                    drift_base_speed = 360  # 3x speed during power surge
+            drift_offset = int(t * drift_base_speed) % 4
             drift_scanlines = np.roll(scanline_overlay, drift_offset, axis=0)
             
             # Apply drifting scanlines
@@ -1202,7 +1179,20 @@ class VideoEngine:
                     fused_arr = np.roll(fused_arr, dx, axis=1)
                     fused_arr = np.roll(fused_arr, dy, axis=0)
 
-            # 6. Render Subtitles using PIL draw
+            # 6. Power Surge on Truth Reveal — CRT overload effect (Scene 3 only)
+            # Apply brightness surge BEFORE subtitles so the whole frame overflows together
+            if is_last_scene and t >= delay_offset:
+                surge_t = t - delay_offset
+                if surge_t < 0.3:
+                    # Brightness decay: starts at 3.0x, decays to 1.0x over 0.25s
+                    if surge_t < 0.25:
+                        decay = 1.0 - surge_t / 0.25
+                        brightness = 1.0 + 2.0 * decay  # 3.0 → 1.0
+                    else:
+                        brightness = 1.0
+                    fused_arr = np.clip(fused_arr.astype(np.float32) * brightness, 0, 255).astype(np.uint8)
+
+            # 7. Render Subtitles using PIL draw
             fused_img = Image.fromarray(fused_arr)
             draw_subs = ImageDraw.Draw(fused_img)
             self._render_highlighted_subtitles(draw_subs, sub_font, words_timing, t, st)
@@ -1255,6 +1245,22 @@ class VideoEngine:
                 print(f"[VideoEngine] Mixed mechanical clock ticking SFX loop up to {fact_start_time:.2f}s")
             except Exception as e:
                 print(f"[VideoEngine] WARNING: Failed to mix clock ticks: {e}")
+
+        # BB. Sub-bass Heartbeat Pulse during card delay (lub-dub, ~70 BPM, 8% volume)
+        heartbeat_path = os.path.join(sfx_dir, "heartbeat.mp3")
+        if os.path.exists(heartbeat_path):
+            try:
+                heartbeat_clip = AudioFileClip(heartbeat_path)
+                heartbeat_dur = heartbeat_clip.duration
+                t_hb = 0.0
+                while t_hb < fact_start_time - 0.1:
+                    hb_instance = heartbeat_clip.set_start(t_hb)
+                    hb_instance = hb_instance.multiply_volume(0.08) if hasattr(hb_instance, "multiply_volume") else hb_instance.volumex(0.08)
+                    audio_clips_to_mix.append(hb_instance)
+                    t_hb += heartbeat_dur
+                print(f"[VideoEngine] Mixed heartbeat.mp3 pulse loop up to {fact_start_time:.2f}s")
+            except Exception as e:
+                print(f"[VideoEngine] WARNING: Failed to mix heartbeat SFX: {e}")
 
         # C. Sub-bass Riser build-up during Hook/Context (rises to max pitch at fact_start_time)
         if os.path.exists(riser_path):
@@ -1970,6 +1976,195 @@ class VideoEngine:
             overlay[y, :, :] = opacity
         return overlay
 
+    @staticmethod
+    def _render_static(size: int = 90, expression: str = "neutral") -> Image.Image:
+        """
+        Renders 'Static' — the channel mascot. A living cloud of CRT TV static
+        noise with glowing dot eyes and a flickering smile.
+        Returns an RGBA PIL Image ready for compositing.
+        Expressions: 'neutral' (default), 'shocked', 'happy', 'wink'
+        """
+        canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(canvas)
+        rng = random.Random(42)  # deterministic noise seed for consistency
+
+        cx, cy = size // 2, size // 2
+        body_r = int(size * 0.40)
+
+        # --- Step 1: Generate noise cloud (static field) ---
+        # Create a larger noise canvas, then blur and mask into a cloud shape
+        noise_canvas = Image.new("L", (size, size), 0)
+        noise_draw = ImageDraw.Draw(noise_canvas)
+
+        # Scatter static points in a roughly circular area
+        num_points = int(size * 5)
+        for _ in range(num_points):
+            # Random position within the body circle, biased toward center
+            angle = rng.uniform(0, 2 * 3.14159)
+            radius = rng.uniform(0, body_r * 1.1)
+            # Density falloff near edges for a soft cloud shape
+            if radius > body_r * 0.8:
+                if rng.random() < 0.5:
+                    continue
+            px = cx + int(radius * math.cos(angle))
+            py = cy + int(radius * math.sin(angle))
+            if 0 <= px < size and 0 <= py < size:
+                brightness = rng.randint(60, 255)
+                noise_draw.point((px, py), fill=brightness)
+
+        # Blur the noise into a fuzzy cloud
+        from PIL import ImageFilter
+        noise_canvas = noise_canvas.filter(ImageFilter.GaussianBlur(radius=size * 0.08))
+
+        # Create circular mask for soft edges
+        mask = Image.new("L", (size, size), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.ellipse(
+            [cx - body_r, cy - body_r, cx + body_r, cy + body_r],
+            fill=255
+        )
+        mask = mask.filter(ImageFilter.GaussianBlur(radius=size * 0.06))
+
+        # Apply mask to noise
+        noise_arr = np.array(noise_canvas, dtype=np.float32)
+        mask_arr = np.array(mask, dtype=np.float32) / 255.0
+        noise_arr = noise_arr * mask_arr
+        noise_arr = np.clip(noise_arr, 0, 255).astype(np.uint8)
+
+        # Tint the static: cyan-blue glow (channel's CRT color)
+        cloud = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        cloud_arr = np.array(cloud)
+        cloud_arr[:, :, 0] = (noise_arr * 0.3).astype(np.uint8)   # R (low)
+        cloud_arr[:, :, 1] = (noise_arr * 0.7).astype(np.uint8)   # G (medium - cyan)
+        cloud_arr[:, :, 2] = noise_arr.astype(np.uint8)            # B (high - blue)
+        cloud_arr[:, :, 3] = np.clip(noise_arr * 1.2, 0, 230).astype(np.uint8)  # alpha
+
+        cloud = Image.fromarray(cloud_arr)
+
+        # --- Step 2: Draw glowing eyes on a separate layer ---
+        eye_overlay = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        eye_draw = ImageDraw.Draw(eye_overlay)
+
+        eye_r = max(3, int(size * 0.045))
+        eye_spacing = int(size * 0.15)
+        eye_y = cy - int(size * 0.03)
+
+        def draw_glow_eye(ex, ey, er, color=(200, 230, 255)):
+            """Draw a glowing eye with soft halo."""
+            # Outer glow (3 layers)
+            for g in range(3, 0, -1):
+                glow_r = er * (1 + g * 0.6)
+                alpha = 40 // g
+                eye_draw.ellipse(
+                    [ex - glow_r, ey - glow_r, ex + glow_r, ey + glow_r],
+                    fill=color + (alpha,)
+                )
+            # Bright core
+            eye_draw.ellipse(
+                [ex - er, ey - er, ex + er, ey + er],
+                fill=(255, 255, 255, 240)
+            )
+
+        def draw_eye_line(ex, ey, length, color=(200, 230, 255)):
+            """Draw a wink line with glow."""
+            for g in range(2, 0, -1):
+                glow_len = length + g * 4
+                alpha = 30 // g
+                eye_draw.line(
+                    [(ex - glow_len // 2, ey), (ex + glow_len // 2, ey)],
+                    fill=color + (alpha,), width=max(2, int(size * 0.03))
+                )
+            eye_draw.line(
+                [(ex - length // 2, ey), (ex + length // 2, ey)],
+                fill=(255, 255, 255, 240), width=max(2, int(size * 0.035))
+            )
+
+        # --- Step 3: Draw mouth ---
+        mouth_y = cy + int(size * 0.08)
+
+        def draw_mouth_glow(start_a, end_a, r_x, r_y):
+            """Draw a mouth arc with glow."""
+            for g in range(2, 0, -1):
+                glow_rx = r_x + g * 3
+                glow_ry = r_y + g * 2
+                alpha = 35 // g
+                eye_draw.arc(
+                    [cx - glow_rx, mouth_y - glow_ry, cx + glow_rx, mouth_y + glow_ry],
+                    start=start_a, end=end_a, fill=(200, 230, 255, alpha),
+                    width=max(1, int(size * 0.02))
+                )
+            eye_draw.arc(
+                [cx - r_x, mouth_y - r_y, cx + r_x, mouth_y + r_y],
+                start=start_a, end=end_a, fill=(255, 255, 255, 230),
+                width=max(2, int(size * 0.04))
+            )
+
+        # --- Expression dispatch ---
+        if expression == "shocked":
+            # Larger glowing eyes, O mouth
+            draw_glow_eye(cx - eye_spacing, eye_y, int(eye_r * 1.4))
+            draw_glow_eye(cx + eye_spacing, eye_y, int(eye_r * 1.4))
+            # O mouth
+            mouth_r = max(3, int(size * 0.055))
+            for g in range(2, 0, -1):
+                gr = mouth_r + g * 3
+                alpha = 35 // g
+                eye_draw.ellipse(
+                    [cx - gr, mouth_y - gr, cx + gr, mouth_y + gr],
+                    fill=(200, 230, 255, alpha)
+                )
+            eye_draw.ellipse(
+                [cx - mouth_r, mouth_y - mouth_r, cx + mouth_r, mouth_y + mouth_r],
+                fill=(255, 255, 255, 230)
+            )
+
+        elif expression == "happy":
+            # Closed happy eyes (arcs)
+            arc_h = int(size * 0.035)
+            eye_draw.arc(
+                [cx - eye_spacing - int(size * 0.05), eye_y - arc_h,
+                 cx - eye_spacing + int(size * 0.05), eye_y + arc_h],
+                start=180, end=360, fill=(255, 255, 255, 230),
+                width=max(2, int(size * 0.035))
+            )
+            eye_draw.arc(
+                [cx + eye_spacing - int(size * 0.05), eye_y - arc_h,
+                 cx + eye_spacing + int(size * 0.05), eye_y + arc_h],
+                start=180, end=360, fill=(255, 255, 255, 230),
+                width=max(2, int(size * 0.035))
+            )
+            # Big wide smile
+            draw_mouth_glow(0, 180, int(size * 0.10), int(size * 0.06))
+
+        elif expression == "wink":
+            # Left eye open with glow, right eye winking
+            draw_glow_eye(cx - eye_spacing, eye_y, eye_r)
+            draw_eye_line(cx + eye_spacing, eye_y, int(size * 0.08))
+            # Smirk
+            draw_mouth_glow(0, 160, int(size * 0.07), int(size * 0.05))
+
+        else:  # neutral (default)
+            # Small glowing dot eyes
+            draw_glow_eye(cx - eye_spacing, eye_y, eye_r)
+            draw_glow_eye(cx + eye_spacing, eye_y, eye_r)
+            # Small smile arc
+            draw_mouth_glow(0, 160, int(size * 0.06), int(size * 0.04))
+
+        # --- Step 4: Composite eyes/mouth onto the noise cloud ---
+        cloud = Image.alpha_composite(cloud, eye_overlay)
+
+        # Add a few flicker dots on the surface (random bright static sparks)
+        spark_draw = ImageDraw.Draw(cloud)
+        for _ in range(int(size * 0.3)):
+            sx = cx + rng.randint(-body_r, body_r)
+            sy = cy + rng.randint(-body_r, body_r)
+            dist = math.sqrt((sx - cx)**2 + (sy - cy)**2)
+            if dist < body_r * 0.8:
+                brightness = rng.randint(180, 255)
+                spark_draw.point((sx, sy), fill=(brightness, brightness, brightness, rng.randint(80, 200)))
+
+        return cloud
+
     def _render_highlighted_subtitles(self, draw: ImageDraw.Draw, font: ImageFont.FreeTypeFont, words: List[Dict[str, Any]], t: float, style: dict = None, y_pos: int = 330, font_px_height: int = 52):
         """
         Draws phrase lines with word-level highlights onto the PIL ImageDraw context.
@@ -2240,7 +2435,7 @@ class VideoEngine:
         return out_path
 
     # New scene-based and flashcard-oriented video compilers
-    def _generate_card(self, image_path: str, label_text: str, status_text: str, is_truth: bool, style_dict: dict, topic: str = "") -> Optional[Image.Image]:
+    def _generate_card(self, image_path: str, label_text: str, status_text: str, is_truth: bool, style_dict: dict, topic: str = "", add_redactions: bool = False) -> Optional[Image.Image]:
         if not image_path or not os.path.exists(image_path):
             return None
         try:
@@ -2255,8 +2450,9 @@ class VideoEngine:
             card_canvas = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
             draw_card = ImageDraw.Draw(card_canvas)
             
-            # Drop shadow
-            draw_card.rounded_rectangle([20, 20, 820, 870], radius=16, fill=(10, 15, 30, 180))
+            # Premium 2-layer drop shadow (dense inner + soft outer)
+            draw_card.rounded_rectangle([18, 18, 822, 872], radius=16, fill=(5, 10, 20, 200))
+            draw_card.rounded_rectangle([22, 22, 818, 868], radius=14, fill=(10, 12, 25, 100))
             
             # Card outline (rounded rectangle for a premium feel)
             outline_color = style_dict["card_truth_outline"] if is_truth else style_dict["card_myth_outline"]
@@ -2265,16 +2461,20 @@ class VideoEngine:
             # Left accent stripe (colored indicator of status)
             draw_card.rectangle([14, 25, 20, 845], fill=outline_color + (255,))
             
-            # Header text (drawn cleaner directly on the card background, no bulky header band)
+            # Header with subtle underline bar
             try:
                 header_font = ImageFont.truetype(self.font_path, 28)
             except Exception:
                 header_font = ImageFont.load_default()
                 
             draw_card.text((34, 30), label_text.upper(), fill=outline_color + (255,), font=header_font)
+            # Subtle header underline (thinner, faded)
+            header_underline_y = 64
+            header_text_w = draw_card.textlength(label_text.upper(), font=header_font) if hasattr(draw_card, 'textlength') else 300
+            draw_card.line([(34, header_underline_y), (34 + int(header_text_w) + 10, header_underline_y)], fill=outline_color + (60,), width=1)
             
             # Paste body image with rounded corners
-            img_w, img_h = 762, 540
+            img_w, img_h = 762, 550
             inner_img = square_img.resize((img_w, img_h), Image.Resampling.LANCZOS)
             
             # Create rounded corner mask for the inner image
@@ -2283,26 +2483,36 @@ class VideoEngine:
             draw_mask.rounded_rectangle([0, 0, img_w, img_h], radius=12, fill=255)
             
             # Paste using mask
-            card_canvas.paste(inner_img, (34, 85), mask=mask)
+            card_canvas.paste(inner_img, (34, 78), mask=mask)
             
-            # Fine outline around the image
-            draw_card.rounded_rectangle([34, 85, 34 + img_w, 85 + img_h], radius=12, outline=outline_color + (80,), width=2)
+            # Premium double border around the image
+            draw_card.rounded_rectangle([34, 78, 34 + img_w, 78 + img_h], radius=12, outline=outline_color + (50,), width=1)
+            draw_card.rounded_rectangle([36, 80, 34 + img_w - 2, 78 + img_h - 2], radius=10, outline=(255, 255, 255, 25), width=1)
             
-            # Topic text
+            # Topic text with separator line above
             try:
-                topic_font = ImageFont.truetype(self.font_path, 28)
+                topic_font = ImageFont.truetype(self.font_path, 32)
                 display_topic = (topic or label_text).upper()
                 # Limit length to fit well
-                if len(display_topic) > 36:
-                    display_topic = display_topic[:33] + "..."
-                draw_card.text((34, 650), display_topic, fill=(255, 255, 255, 240), font=topic_font)
+                if len(display_topic) > 34:
+                    display_topic = display_topic[:31] + "..."
+                
+                # Subtle separator line above topic
+                topic_sep_y = 648
+                draw_card.line([(34, topic_sep_y), (796, topic_sep_y)], fill=(255, 255, 255, 25), width=1)
+                
+                draw_card.text((34, 658), display_topic, fill=(255, 255, 255, 240), font=topic_font)
             except Exception:
                 pass
                 
             # Status dot & label
-            status_y = 698
-            dot_color = (255, 60, 60) if ("DEBUNKED" in status_text.upper() or "ANOMALOUS" in status_text.upper()) else (0, 242, 254)
-            # Draw glowing status dot
+            status_y = 708
+            is_debunked = ("DEBUNKED" in status_text.upper() or "ANOMALOUS" in status_text.upper())
+            dot_color = (255, 60, 60) if is_debunked else (0, 242, 254)
+            # Draw glowing status dot with outer glow ring
+            glow_radius = 12
+            dot_cx, dot_cy = 40, status_y + 12
+            draw_card.ellipse([dot_cx - glow_radius, dot_cy - glow_radius, dot_cx + glow_radius, dot_cy + glow_radius], fill=dot_color + (40,))
             draw_card.ellipse([34, status_y + 6, 46, status_y + 18], fill=dot_color + (255,))
             try:
                 status_font = ImageFont.truetype(self.font_path, 20)
@@ -2311,18 +2521,89 @@ class VideoEngine:
                 pass
                 
             # Dashed/Subtle separator
-            sep_y = 742
-            draw_card.line([(34, sep_y), (796, sep_y)], fill=(255, 255, 255, 30), width=1)
+            sep_y = 750
+            for dash_x in range(34, 796, 20):
+                draw_card.line([(dash_x, sep_y), (min(dash_x + 10, 796), sep_y)], fill=(255, 255, 255, 30), width=1)
             
-            # Footer metadata (unique case number + channel brand)
-            footer_y = 762
+            # Footer metadata with subtle background pill
+            footer_y = 770
             case_num = f"CASE #{abs(hash(topic or label_text)) % 9999:04d}"
             try:
                 footer_font = ImageFont.truetype(self.font_path, 18)
-                draw_card.text((34, footer_y), f"{case_num}  |  THE DAILY AUDIT", fill=(255, 255, 255, 100), font=footer_font)
+                footer_text = f"{case_num}  |  THE DAILY AUDIT"
+                fw = int(draw_card.textlength(footer_text, font=footer_font)) if hasattr(draw_card, 'textlength') else 0
+                # Subtle background pill behind footer
+                pill_pad = 12
+                pill_x1 = 34 - 4
+                pill_y1 = footer_y - 4
+                pill_x2 = 34 + fw + pill_pad + 4
+                pill_y2 = footer_y + 24 + 4
+                draw_card.rounded_rectangle([pill_x1, pill_y1, pill_x2, pill_y2], radius=6, fill=(255, 255, 255, 12))
+                draw_card.text((34, footer_y), footer_text, fill=(255, 255, 255, 100), font=footer_font)
             except Exception:
                 pass
+
+            # Redaction bars for Scene 1 — curiosity gap (black bars with [REDACTED] stamps over the image)
+            if add_redactions:
+                import hashlib
+                seed_str = (topic or label_text or str(style_dict.get("myth_label", "")))
+                rng_seed = int(hashlib.md5(seed_str.encode()).hexdigest(), 16) % 999999
+                rng = random.Random(rng_seed)
                 
+                # Cover ~30% of the image area with 2-3 bars in random positions
+                num_bars = rng.randint(2, 3)
+                redaction_draw = ImageDraw.Draw(card_canvas)
+                
+                # Bar spans horizontally across the image inset: x range 34 to 796 (w=762)
+                bar_left = 34
+                bar_right = 796
+                bar_width = bar_right - bar_left
+                
+                # Image area runs from y=85 to y=625 (540px height)
+                img_top = 85
+                img_bottom = 85 + 540
+                img_height = 540
+                
+                used_regions = []  # track y ranges to avoid overlaps
+                
+                for b in range(num_bars):
+                    bar_height = rng.randint(35, 75)
+                    # Find a gap that doesn't overlap previous bars
+                    for attempt in range(20):
+                        bar_y = rng.randint(img_top + 10, img_bottom - bar_height - 10)
+                        overlap = False
+                        for (used_y, used_h) in used_regions:
+                            if bar_y < used_y + used_h and bar_y + bar_height > used_y:
+                                overlap = True
+                                break
+                        if not overlap:
+                            break
+                    
+                    used_regions.append((bar_y, bar_height))
+                    
+                    # Black bar with slight transparency for subtle CRT feel
+                    redaction_draw.rectangle(
+                        [bar_left, bar_y, bar_right, bar_y + bar_height],
+                        fill=(0, 0, 0, 230)
+                    )
+                    # Thin red top border on the bar (classified stamp aesthetic)
+                    redaction_draw.rectangle(
+                        [bar_left, bar_y, bar_right, bar_y + 2],
+                        fill=(180, 40, 40, 200)
+                    )
+                    # "[REDACTED]" text centered in the bar
+                    redacted_text = "[REDACTED]"
+                    try:
+                        red_font = ImageFont.truetype(self.font_path, max(14, bar_height // 3))
+                        rt_w = int(draw_card.textlength(redacted_text, font=red_font)) if hasattr(draw_card, 'textlength') else 0
+                        red_x = (bar_left + bar_right - rt_w) // 2 if rt_w else bar_left + 30
+                        red_y = bar_y + (bar_height - max(14, bar_height // 3)) // 2
+                        redaction_draw.text((red_x, red_y), redacted_text, fill=(180, 40, 40, 200), font=red_font)
+                    except Exception:
+                        pass
+                
+                print(f"[VideoEngine] Applied {num_bars} redaction bar(s) to card (seed={rng_seed})")
+
             return card_canvas
         except Exception as e:
             print(f"[VideoEngine] WARNING: Failed to generate forensic card for {image_path}: {e}")
@@ -2357,7 +2638,7 @@ class VideoEngine:
             print(f"[VideoEngine] Error parsing SRT file {srt_path}: {e}")
             return []
 
-    def _render_srt_subtitle_block(self, draw: ImageDraw.Draw, font: ImageFont.FreeTypeFont, text: str, y_pos: int = 1450):
+    def _render_srt_subtitle_block(self, draw: ImageDraw.Draw, font: ImageFont.FreeTypeFont, text: str, y_pos: int = 1310):
         # Wrap words to fit within max width (960px)
         max_width = 960
         wrapped_lines = []
@@ -2389,7 +2670,259 @@ class VideoEngine:
             # 2px black stroke, white text, no background box
             draw.text((x, y), line, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
 
-    def _create_scene_clip(self, bg_source: Any, card_image: Optional[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, audio_clip: Optional[Any] = None, mid_roll_word_indices: Optional[set] = None, is_last_scene: bool = False, audio_path: Optional[str] = None) -> 'VideoClip':
+    def _render_kinetic_srt_block(self, draw: ImageDraw.Draw, font: ImageFont.FreeTypeFont,
+                                  block_text: str, t_audio_ms: float,
+                                  word_boundaries: list, y_pos: int = 1540,
+                                  style: dict = None):
+        """
+        Renders an SRT subtitle block with word-level kinetic highlighting.
+        Uses real word-level timestamps (from .words.json) to highlight the
+        currently spoken word with a yellow background pill.
+        Emphasis words are rendered at 130% font size with accent color bg.
+        """
+        if style is None:
+            style = STYLE_PRESETS["blueprint"]
+        highlight_bg = style.get("highlight_bg", (255, 242, 0))
+        accent_color = style.get("card_myth_outline", (255, 75, 75))
+        
+        # Split block text into individual words
+        block_words = block_text.split()
+        
+        # Find which word in the block is currently spoken, based on word boundary timestamps
+        active_word_index_in_block = -1
+        if word_boundaries:
+            for idx, wb in enumerate(word_boundaries):
+                wb_start = wb["offset_ms"]
+                wb_end = wb["offset_ms"] + wb["duration_ms"]
+                if wb_start <= t_audio_ms < wb_end:
+                    active_word_index_in_block = idx
+                    break
+        
+        # Map word boundary indices to words in this block
+        # word_boundaries is a subset of the full scene word list for JUST this block
+        # Since we don't know which words from the full list are in this block,
+        # we'll align by matching each word position within the block text
+        
+        # Wrap words to fit within max width (960px)
+        max_width = 960
+        wrapped_line_words = []  # list of lists, each sublist is (word_text, is_active, is_emphasis_pos)
+        current_line = []
+        current_width = 0.0
+        space_width = draw.textlength(" ", font=font)
+        
+        # For emphasis detection: mark words that should be emphasized
+        # Emphasis words are typically short (3-8 chars) key words — we mark every Nth word
+        # as a potential emphasis word based on position in the block
+        emphasis_indices = set()
+        if len(block_words) >= 4:
+            # Mark roughly every 5th word as emphasis (matches SSML emphasis patterns)
+            for ei in range(3, len(block_words), 5):
+                emphasis_indices.add(ei)
+            # Always emphasize the last word (strong reveal position)
+            emphasis_indices.add(len(block_words) - 1)
+        
+        # Use large font for emphasis words
+        try:
+            emphasis_font = ImageFont.truetype(self.font_path, 68)
+        except Exception:
+            emphasis_font = font
+        
+        for word_idx, word in enumerate(block_words):
+            # Determine if this word matches the active boundary
+            is_active = (word_idx == active_word_index_in_block)
+            is_emphasis = (word_idx in emphasis_indices)
+            
+            use_font = emphasis_font if is_emphasis else font
+            w_width = draw.textlength(word, font=use_font)
+            
+            if not current_line:
+                current_line = [(word, is_active, is_emphasis, use_font, w_width)]
+                current_width = w_width
+            else:
+                new_width = current_width + space_width + w_width
+                if new_width <= max_width:
+                    current_line.append((word, is_active, is_emphasis, use_font, w_width))
+                    current_width = new_width
+                else:
+                    wrapped_line_words.append(current_line)
+                    current_line = [(word, is_active, is_emphasis, use_font, w_width)]
+                    current_width = w_width
+        
+        if current_line:
+            wrapped_line_words.append(current_line)
+        
+        # SAFETY: cap at max 2 lines to prevent overflow past frame bottom (1920px)
+        if len(wrapped_line_words) > 2:
+            wrapped_line_words = wrapped_line_words[:2]
+        
+        line_height = 80  # taller to accommodate 68px emphasis font
+        y_cursor = y_pos
+        
+        for line_idx, line_words in enumerate(wrapped_line_words):
+            # Safety check: skip rendering if this line would go past frame bottom
+            if y_cursor + line_height + 10 > 1920:
+                break
+            # Calculate total line width
+            total_w = sum(w[4] for w in line_words) + space_width * (len(line_words) - 1)
+            x_cursor = (1080 - int(total_w)) // 2
+            
+            for word_info in line_words:
+                w_text, w_active, w_emphasis, w_font, w_width = word_info
+                
+                if w_active:
+                    # Active word: yellow highlight pill with rounded corners
+                    h_padding = 8
+                    v_padding = 6
+                    pill_x1 = x_cursor - h_padding
+                    pill_y1 = y_cursor - v_padding
+                    pill_x2 = x_cursor + int(w_width) + h_padding
+                    pill_y2 = y_cursor + line_height + v_padding
+                    draw.rounded_rectangle(
+                        [pill_x1, pill_y1, pill_x2, pill_y2],
+                        radius=6, fill=highlight_bg + (255,)
+                    )
+                    # Active word text color: dark text on yellow bg
+                    draw.text((x_cursor, y_cursor), w_text, fill=(10, 15, 30), font=w_font)
+                elif w_emphasis:
+                    # Emphasis word: accent color with subtle glow
+                    draw.text((x_cursor + 3, y_cursor + 3), w_text, fill=(0, 0, 0, 80), font=w_font)
+                    draw.text((x_cursor, y_cursor), w_text, fill=accent_color + (255,), font=w_font)
+                else:
+                    # Normal word: white with 2px stroke
+                    draw.text((x_cursor + 2, y_cursor + 2), w_text, fill=(0, 0, 0, 60), font=w_font)
+                    draw.text((x_cursor, y_cursor), w_text, fill=(255, 255, 255), font=w_font, stroke_width=1, stroke_fill=(0, 0, 0))
+                
+                x_cursor += int(w_width) + int(space_width)
+            
+            y_cursor += line_height
+
+    # ── Sprint B: Emotion Beat Generator ─────────────────────────────────
+
+    def _generate_emotion_beats(self, text: str, scene_idx: int, audio_duration: float, delay_offset: float) -> list:
+        """Scan scene script text for emotion keywords and return list of (timestamp, expression, duration).
+        These drive Static's reactive expressions at precise moments."""
+        if not text:
+            return []
+        lower = text.lower()
+        beats = []
+        if scene_idx == 0:
+            beats.append((delay_offset + audio_duration * 0.15, "neutral", 0.8))
+            shock_words = ["shocking", "you won't believe", "crazy", "insane", "wrong", "lie",
+                           "fake", "myth", "never happened", "debunked"]
+            if any(w in lower for w in shock_words):
+                beats.append((delay_offset + audio_duration * 0.45, "shocked", 1.0))
+        elif scene_idx == 1:
+            tension_words = ["but", "here's the thing", "actually", "surprising",
+                             "get this", "the kicker", "it gets", "wait"]
+            if any(w in lower for w in tension_words):
+                beats.append((delay_offset + audio_duration * 0.3, "shocked", 0.9))
+            beats.append((delay_offset + audio_duration * 0.7, "neutral", 0.6))
+        elif scene_idx >= 2:
+            beats.append((delay_offset + audio_duration * 0.1, "wink", 0.7))
+            happy_words = ["truth", "revealed", "fact", "actually", "proven",
+                           "real", "evidence", "case closed", "debunked"]
+            if any(w in lower for w in happy_words):
+                beats.append((delay_offset + audio_duration * 0.4, "happy", 1.2))
+        return beats
+
+    # ── Sprint B: File Stamp Renderer ────────────────────────────────────
+
+    def _render_stamp(self, stamp_text: str, scene_idx: int, t: float, delay_offset: float) -> Optional[Image.Image]:
+        """Render a 'File Stamp' overlay. Returns RGBA PIL Image or None if outside stamp window."""
+        if scene_idx < 2 or not stamp_text:
+            return None
+        stamp_t = t - delay_offset
+        if stamp_t < 0 or stamp_t > 0.6:
+            return None
+
+        canvas = Image.new("RGBA", (500, 160), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(canvas)
+        upper = stamp_text.upper()
+        if "DEBUNKED" in upper or "MYTH" in upper:
+            stamp_color = (220, 30, 30)
+        elif "VERIFIED" in upper or "FACT" in upper:
+            stamp_color = (30, 180, 60)
+        else:
+            stamp_color = (220, 180, 20)
+
+        slam_progress = min(1.0, stamp_t / 0.15)
+        if slam_progress < 1.0:
+            scale = 1.0 + 2.0 * (1.0 - slam_progress) * math.cos(slam_progress * math.pi * 2)
+            scale = max(0.8, scale)
+        else:
+            scale = 1.0
+
+        cw, ch = 500, 160
+        scaled_w = int(cw * scale)
+        scaled_h = int(ch * scale)
+        sx = (cw - scaled_w) // 2
+        sy = (ch - scaled_h) // 2
+
+        stamp_frame = Image.new("RGBA", (scaled_w, scaled_h), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(stamp_frame)
+        sd.rounded_rectangle([4, 4, scaled_w - 4, scaled_h - 4], radius=16,
+                             fill=stamp_color + (220,), outline=(255, 255, 255, 200), width=4)
+        sd.rounded_rectangle([10, 10, scaled_w - 10, scaled_h - 10], radius=12,
+                             fill=None, outline=(255, 255, 255, 80), width=1)
+        try:
+            stamp_font = ImageFont.truetype(self.font_path, int(min(scaled_w, scaled_h) * 0.22))
+        except Exception:
+            stamp_font = ImageFont.load_default()
+        tw = sd.textlength(stamp_text, font=stamp_font)
+        tx = (scaled_w - int(tw)) // 2
+        ty = (scaled_h - int(min(scaled_w, scaled_h) * 0.25)) // 2
+        sd.text((tx, ty), stamp_text, fill=(255, 255, 255, 240), font=stamp_font)
+        canvas.paste(stamp_frame, (sx, sy), stamp_frame)
+        return canvas
+
+    # ── Sprint B: Category Themed Backgrounds ────────────────────────────
+
+    CATEGORY_THEMES = {
+        "biology": {"tint": (20, 100, 30), "strength": 0.08, "pattern": "cells"},
+        "history": {"tint": (80, 60, 20), "strength": 0.12, "pattern": "paper"},
+        "astronomy": {"tint": (20, 10, 80), "strength": 0.10, "pattern": "stars"},
+        "physics": {"tint": (10, 30, 80), "strength": 0.10, "pattern": "grid"},
+        "neuroscience": {"tint": (60, 20, 60), "strength": 0.08, "pattern": "waves"},
+        "psychology": {"tint": (60, 30, 50), "strength": 0.08, "pattern": "waves"},
+        "technology": {"tint": (10, 60, 70), "strength": 0.10, "pattern": "grid"},
+        "geology": {"tint": (50, 40, 10), "strength": 0.10, "pattern": "dots"},
+        "chemistry": {"tint": (30, 50, 20), "strength": 0.08, "pattern": "dots"},
+        "economics": {"tint": (40, 40, 60), "strength": 0.06, "pattern": "lines"},
+        "linguistics": {"tint": (40, 20, 50), "strength": 0.06, "pattern": "lines"},
+        "anthropology": {"tint": (60, 40, 20), "strength": 0.08, "pattern": "dots"},
+    }
+
+    def _apply_category_overlay(self, frame: np.ndarray, category: str, t: float) -> np.ndarray:
+        """Apply a subtle category-themed tint and pattern overlay to the frame."""
+        if not category:
+            return frame
+        cat_lower = category.lower().strip()
+        theme = None
+        for key, val in self.CATEGORY_THEMES.items():
+            if key in cat_lower or cat_lower in key:
+                theme = val
+                break
+        if theme is None:
+            return frame
+
+        # Apply subtle tint
+        tint_arr = np.array(theme["tint"], dtype=np.float32).reshape(1, 1, 3)
+        frame_f = frame.astype(np.float32)
+        frame_f = frame_f * (1.0 - theme["strength"]) + tint_arr * theme["strength"]
+        result = np.clip(frame_f, 0, 255).astype(np.uint8)
+        return result
+
+    # ── End Sprint B ─────────────────────────────────────────────────────
+
+    def _create_scene_clip(self, bg_source: Any, card_image: Optional[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, audio_clip: Optional[Any] = None, mid_roll_word_indices: Optional[set] = None, is_last_scene: bool = False, audio_path: Optional[str] = None,
+                            emotion_beats: Optional[list] = None, stamp_text: Optional[str] = None,
+                            category: str = "") -> 'VideoClip':
+        """
+        Creates a single scene clip with CRT effects, card, subtitles, and mascot.
+        emotion_beats: list of (timestamp, expression_str, duration_s) for Static reactions (Sprint B)
+        stamp_text: if set, renders a File Stamp at truth reveal with this text
+        category: topic category for themed background overlays (Sprint B)
+        """
         try:
             from moviepy.editor import VideoClip, VideoFileClip
         except ImportError:
@@ -2472,10 +3005,20 @@ class VideoEngine:
 
         # Load SRT blocks
         srt_blocks = []
+        word_boundaries = []
         if audio_path and os.path.exists(audio_path):
             srt_path = os.path.splitext(audio_path)[0] + ".srt"
             if os.path.exists(srt_path):
                 srt_blocks = self._parse_srt_file(srt_path)
+                # Load word-level timestamps for kinetic highlighting
+                words_json_path = os.path.splitext(audio_path)[0] + ".words.json"
+                if os.path.exists(words_json_path):
+                    try:
+                        import json
+                        with open(words_json_path, "r", encoding="utf-8") as wf:
+                            word_boundaries = json.load(wf)
+                    except Exception as e:
+                        print(f"[VideoEngine] WARNING: Failed to load word boundaries: {e}")
                 
         # Fallback if no SRT file exists
         if not srt_blocks:
@@ -2541,25 +3084,53 @@ class VideoEngine:
                 processed_bg[:, :, 1] = np.clip(processed_bg[:, :, 1] + 10, 0, 255)
                 processed_bg = processed_bg.astype(np.uint8)
 
-            zoom_factor = 1.0 + 0.12 * (t / total_duration)
+            # ── Sprint 6: Parallax Depth Layers ──
+            mid_zoom = 1.0 + 0.12 * (t / total_duration)
+            deep_zoom = 1.0 + 0.05 * (t / total_duration)  # deep layer moves at ~40% speed
             shake_x, shake_y = 0, 0
             if is_last_scene and t >= delay_offset:
                 t_audio = t - delay_offset
                 if t_audio < 0.5:
                     extra_zoom = 0.15 * math.sin((t_audio / 0.5) * math.pi)
-                    zoom_factor += extra_zoom
+                    mid_zoom += extra_zoom
+                    deep_zoom += extra_zoom * 0.4  # less impact on deep layer
                 # Screen shake during the first 0.2 seconds of scene 3 reveal
                 if t_audio < 0.2:
                     shake_x = random.randint(-4, 4)
                     shake_y = random.randint(-4, 4)
 
             h, w, c = processed_bg.shape
-            new_h, new_w = int(h / zoom_factor), int(w / zoom_factor)
-            top = max(0, min(h - new_h, (h - new_h) // 2 + shake_y))
-            left = max(0, min(w - new_w, (w - new_w) // 2 + shake_x))
-            cropped_bg = processed_bg[top:top+new_h, left:left+new_w]
-            bg_frame_img = Image.fromarray(cropped_bg).resize((w, h), Image.Resampling.BILINEAR)
-            
+
+            # Mid layer (normal zoom)
+            mid_new_h, mid_new_w = int(h / mid_zoom), int(w / mid_zoom)
+            mid_top = max(0, min(h - mid_new_h, (h - mid_new_h) // 2 + shake_y))
+            mid_left = max(0, min(w - mid_new_w, (w - mid_new_w) // 2 + shake_x))
+            mid_crop = processed_bg[mid_top:mid_top+mid_new_h, mid_left:mid_left+mid_new_w]
+            mid_layer = np.array(Image.fromarray(mid_crop).resize((w, h), Image.Resampling.BILINEAR))
+
+            # Deep layer (slower zoom, blurred + darkened)
+            deep_new_h, deep_new_w = int(h / deep_zoom), int(w / deep_zoom)
+            deep_top = (h - deep_new_h) // 2
+            deep_left = (w - deep_new_w) // 2
+            deep_crop = processed_bg[deep_top:deep_top+deep_new_h, deep_left:deep_left+deep_new_w]
+            deep_layer = np.array(Image.fromarray(deep_crop).resize((w, h), Image.Resampling.BILINEAR))
+            # Apply blur + darken to deep layer for parallax depth feel
+            from PIL import ImageFilter
+            deep_pil = Image.fromarray(deep_layer).filter(ImageFilter.GaussianBlur(radius=3))
+            deep_layer = np.array(deep_pil).astype(np.float32)
+            deep_layer = np.clip(deep_layer * 0.7, 0, 255).astype(np.uint8)
+
+            # Composite: 25% deep + 75% mid
+            bg_frame_arr = np.clip(
+                deep_layer.astype(np.float32) * 0.25 + mid_layer.astype(np.float32) * 0.75,
+                0, 255
+            ).astype(np.uint8)
+            bg_frame_img = Image.fromarray(bg_frame_arr)
+
+            # Sprint B — Category-themed background tint
+            bg_frame_arr = self._apply_category_overlay(np.array(bg_frame_img), category, t)
+            bg_frame_img = Image.fromarray(bg_frame_arr)
+
             draw_bg = ImageDraw.Draw(bg_frame_img)
             
             # Minimal case identifier (replaces removed HUD clutter: radar, oscilloscope, telemetry, redactions)
@@ -2592,14 +3163,23 @@ class VideoEngine:
                     scaled_stamp = Image.fromarray(r_arr)
                     bg_frame_img.paste(scaled_stamp, (wpx, wpy), scaled_stamp)
 
-            # Scene labels at the top
+            # Scene labels at the top — typewriter effect (characters appear one at a time)
             if scene_label:
-                lw = draw_bg.textlength(scene_label, font=label_font)
-                draw_bg.text((60, 60), scene_label, fill=(180, 60, 60), font=label_font)
-                draw_bg.line([(60, 90), (60 + int(lw), 90)], fill=(180, 60, 60, 150), width=2)
+                # Typewriter reveal: 33 chars/sec (~30ms per character), full text by 0.8s
+                typewriter_count = min(len(scene_label), int(t * 33))
+                typewriter_label = scene_label[:typewriter_count]
+                if typewriter_count > 0:
+                    lw = draw_bg.textlength(typewriter_label, font=label_font)
+                    draw_bg.text((60, 60), typewriter_label, fill=(180, 60, 60), font=label_font)
+                    if typewriter_count == len(scene_label):
+                        # Full text: show underline
+                        draw_bg.line([(60, 90), (60 + int(lw), 90)], fill=(180, 60, 60, 150), width=2)
             if scene_title:
-                stw = draw_bg.textlength(scene_title, font=scene_title_font)
-                draw_bg.text(((1080 - stw) // 2, 120), scene_title, fill=(255, 255, 255, 200), font=scene_title_font)
+                typewriter_count = min(len(scene_title), int(t * 33))
+                typewriter_title = scene_title[:typewriter_count]
+                if typewriter_count > 0:
+                    stw = draw_bg.textlength(typewriter_title, font=scene_title_font)
+                    draw_bg.text(((1080 - stw) // 2, 120), typewriter_title, fill=(255, 255, 255, 200), font=scene_title_font)
 
             # --- Per-scene countdown timer bar (top edge, subtle) ---
             bar_y = 8
@@ -2630,23 +3210,63 @@ class VideoEngine:
             grit_idx = int(t * 15) % 10
             fused_arr = np.clip(fused_arr.astype(np.int16) + grit_frames[grit_idx].astype(np.int16), 0, 255).astype(np.uint8)
 
-            # Mascot compositing (subtle easter egg — behind card, on top of grit)
-            if hasattr(self, 'mascot_img') and scene_idx == 0:
-                if 0.5 <= t <= 3.0:
-                    local_t = t - 0.5
-                    bounce_y = int(4 * math.sin(local_t * 2.0))
-                    mx = 60
-                    my = 100 + bounce_y
-                    fused_img = Image.fromarray(fused_arr)
-                    mascot_paste = self.mascot_img.copy()
-                    mascot_opacity = 0.55
-                    if mascot_opacity < 1.0:
+            # Mascot compositing — emotion beats (Sprint B: Static reacts to content)
+            if hasattr(self, 'mascot_img') and emotion_beats:
+                for beat_ts, beat_expr, beat_dur in emotion_beats:
+                    if beat_ts <= t <= beat_ts + beat_dur:
+                        # Render Static with specific expression in prominent position
+                        beat_mascot = VideoEngine._render_static(size=90, expression=beat_expr)
+                        # Right side, near card area (visible, not hidden)
+                        beat_mx = 920
+                        beat_my = 400 + scene_idx * 200  # varies per scene
+                        # Subtle jitter
+                        beat_jx = int(3 * math.sin(t * 8))
+                        beat_jy = int(2 * math.cos(t * 7))
+                        fused_img = Image.fromarray(fused_arr).convert("RGBA")
+                        fused_img.paste(beat_mascot, (beat_mx + beat_jx, beat_my + beat_jy), beat_mascot)
+                        fused_arr = np.array(fused_img.convert("RGB"))
+                        break  # only one beat at a time
+
+            # Mascot compositing (subtle easter egg — The Lens peeks into scenes) — only when no emotion beat active
+            if hasattr(self, 'mascot_img'):
+                # Deterministic appearance per scene based on video_seed + scene_idx
+                egg_seed = (self.video_seed or 0) + scene_idx * 7
+                egg_rng = random.Random(egg_seed)
+                egg_present = egg_rng.random() < 0.75  # 75% chance per scene
+                
+                if egg_present:
+                    # Each scene has different timing windows and positions
+                    egg_start = {0: 0.6, 1: 1.0, 2: 0.8}.get(scene_idx, 0.8)
+                    egg_end = egg_start + egg_rng.uniform(0.8, 1.5)
+                    egg_positions = [
+                        (60, 80),      # top-left peeking
+                        (920, 60),     # top-right corner
+                        (60, 900),     # left mid, behind card
+                        (920, 800),    # right mid
+                        (500, 60),     # top center
+                        (920, 1200),   # right lower
+                    ]
+                    egg_pos = egg_positions[scene_idx % len(egg_positions)]
+                    
+                    if egg_start <= t <= egg_end:
+                        local_t = t - egg_start
+                        bounce_y = int(3 * math.sin(local_t * 2.5))
+                        mx = egg_pos[0]
+                        my = egg_pos[1] + bounce_y
+                        
+                        # Subtle drift — Lens slowly moves horizontally
+                        drift_x = int(10 * math.sin(local_t * 0.8))
+                        mx += drift_x
+                        
+                        fused_img = Image.fromarray(fused_arr)
+                        mascot_paste = self.mascot_img.copy()
+                        # Gentle pulsing opacity
+                        pulse = 0.6 + 0.15 * math.sin(local_t * 2.0)
                         m_arr = np.array(mascot_paste)
-                        alpha_mod = 0.8 + 0.2 * math.sin(local_t * 1.5)
-                        m_arr[:, :, 3] = (m_arr[:, :, 3] * mascot_opacity * alpha_mod).astype(np.uint8)
+                        m_arr[:, :, 3] = (m_arr[:, :, 3] * pulse).astype(np.uint8)
                         mascot_paste = Image.fromarray(m_arr)
-                    fused_img.paste(mascot_paste, (mx, my), mascot_paste)
-                    fused_arr = np.array(fused_img)
+                        fused_img.paste(mascot_paste, (mx, my), mascot_paste)
+                        fused_arr = np.array(fused_img)
 
             # Elastic Card (pop animation) or Static Card (last/verdict scene)
             if card_image is not None:
@@ -2674,6 +3294,44 @@ class VideoEngine:
                         fused_img.paste(scaled_card, (px, py), scaled_card)
                         fused_arr = np.array(fused_img)
 
+            # ── Sprint 6: Focal Point Vignette — radial gradient follows card position ──
+            if card_image is not None:
+                # Card center position (540, 900) during elastic animation; static at (540, 900) for last scene
+                vx, vy = 540, 900
+                h_f, w_f = fused_arr.shape[:2]
+                yy, xx = np.meshgrid(np.arange(h_f, dtype=np.float32), np.arange(w_f, dtype=np.float32), indexing='ij')
+                dist = np.sqrt((xx - vx) ** 2 + (yy - vy) ** 2)
+                max_dist = np.sqrt(vx ** 2 + vy ** 2)
+                # Vignette: 0 at card center, ramps to 0.35 at frame edges
+                vignette_factor = np.clip(dist / max_dist * 1.8, 0, 1) ** 1.8 * 0.35
+                vignette_factor = vignette_factor[:, :, np.newaxis]
+                fused_arr = np.clip(fused_arr.astype(np.float32) * (1.0 - vignette_factor), 0, 255).astype(np.uint8)
+
+            # ── Sprint 6: Forensic Scan Line Animation — horizontal sweep on card reveal ──
+            SCAN_DURATION = 0.35
+            scan_active = False
+            scan_progress = 0.0
+            if card_image is not None and not is_last_scene:
+                if 0.2 <= t < 0.2 + SCAN_DURATION:
+                    scan_active = True
+                    scan_progress = (t - 0.2) / SCAN_DURATION
+            if scan_active and scan_progress > 0.0:
+                # Card bottom edge position in frame coordinates
+                card_top_y = 900 - 890 // 2  # = 455
+                card_bottom_y = card_top_y + 890  # = 1345
+                scan_y = card_top_y + int(scan_progress * 890)
+                scan_y = min(scan_y, card_bottom_y)
+                # Draw a bright horizontal scan line
+                line_h = 3
+                scan_top = max(card_top_y, scan_y - line_h)
+                scan_bottom = min(card_bottom_y, scan_y + line_h)
+                if scan_bottom > scan_top:
+                    scan_brightness = int(180 + 75 * math.sin(scan_progress * math.pi * 6))
+                    fused_arr[scan_top:scan_bottom, :, :] = np.clip(
+                        fused_arr[scan_top:scan_bottom, :, :].astype(np.int16) + scan_brightness,
+                        0, 255
+                    ).astype(np.uint8)
+
             # Pre-transition cue visual glitch: cued at last 0.15s of the scene
             if not is_last_scene and total_duration - 0.15 <= t <= total_duration:
                 y_start = random.randint(0, 1919)
@@ -2696,11 +3354,83 @@ class VideoEngine:
                 if active_block:
                     fused_img = Image.fromarray(fused_arr)
                     draw_subs = ImageDraw.Draw(fused_img)
-                    # Display full subtitle line (not word-by-word) timed to sentence boundaries.
-                    # Position: lower third — y_pos=1680 for better mobile legibility
-                    self._render_srt_subtitle_block(draw_subs, sub_font, active_block["text"], y_pos=1680)
+                    # Word-level kinetic subtitle rendering using real timestamps
+                    self._render_kinetic_srt_block(
+                        draw_subs, sub_font, active_block["text"],
+                        t_audio_ms, word_boundaries, y_pos=1680, style=style_dict
+                    )
                     fused_arr = np.array(fused_img)
-                
+
+                # ── Sprint 7: Animated Data Counters ──
+                # Detect numbers in the spoken word and render counting-up animation
+                if t >= delay_offset and word_boundaries:
+                    tc_audio_ms = (t - delay_offset) * 1000.0 + self.subtitle_lookahead_ms
+                    # Find the currently spoken word in word_boundaries
+                    active_wb = None
+                    for wb in word_boundaries:
+                        wb_off = wb.get("offset_ms", 0)
+                        wb_dur = wb.get("duration_ms", 0)
+                        if wb_off <= tc_audio_ms < wb_off + wb_dur:
+                            active_wb = wb
+                            break
+                    if active_wb:
+                        import re as _re
+                        w_clean = active_wb.get("word", "").strip(".,!?;: ")
+                        num_match = _re.search(r'(\d+(?:\.\d+)?)', w_clean)
+                        if num_match:
+                            target_str = num_match.group(1)
+                            is_float = '.' in target_str
+                            target = float(target_str)
+                            elapsed_ms = tc_audio_ms - active_wb["offset_ms"]
+                            progress = min(1.0, elapsed_ms / 1500.0)
+                            eased = 1.0 - (1.0 - progress) ** 3
+                            if is_float:
+                                animated_val = target * eased
+                                counter_text = f"{animated_val:.1f}"
+                            else:
+                                animated_val = int(target * eased)
+                                counter_text = str(animated_val)
+
+                            # Render the counter as a large glowing number
+                            try:
+                                ctr_font = ImageFont.truetype(self.font_path, 72)
+                            except Exception:
+                                ctr_font = ImageFont.load_default()
+
+                            fused_img_local = Image.fromarray(fused_arr).convert("RGBA")
+                            ctr_layer = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
+                            draw_ctr = ImageDraw.Draw(ctr_layer)
+                            ctw = int(draw_ctr.textlength(counter_text, font=ctr_font))
+                            ctx = (1080 - ctw) // 2
+                            cty = 1480
+
+                            # Glow rings around the counter number
+                            glow_col = (255, 242, 0)  # highlight yellow
+                            for g_o in range(3, 0, -1):
+                                gx = g_o * 4
+                                ga = 25 // g_o
+                                draw_ctr.text((ctx - gx, cty), counter_text, fill=glow_col + (ga,), font=ctr_font)
+                                draw_ctr.text((ctx + gx, cty), counter_text, fill=glow_col + (ga,), font=ctr_font)
+                                draw_ctr.text((ctx, cty - gx), counter_text, fill=glow_col + (ga,), font=ctr_font)
+                                draw_ctr.text((ctx, cty + gx), counter_text, fill=glow_col + (ga,), font=ctr_font)
+
+                            # Main text with stroke
+                            draw_ctr.text((ctx + 2, cty + 2), counter_text, fill=(0, 0, 0, 180), font=ctr_font)
+                            draw_ctr.text((ctx, cty), counter_text, fill=(255, 255, 255, 255), font=ctr_font)
+                            fused_img_local = Image.alpha_composite(fused_img_local, ctr_layer).convert("RGB")
+                            fused_arr = np.array(fused_img_local)
+
+                # ── Sprint B: File Stamp at truth reveal ──
+                if is_last_scene and stamp_text and t >= delay_offset:
+                    stamp_img = self._render_stamp(stamp_text, scene_idx, t, delay_offset)
+                    if stamp_img is not None:
+                        # Position: centered at bottom-third, above card area
+                        stamp_cx = (1080 - stamp_img.width) // 2
+                        stamp_cy = 1200 - stamp_img.height // 2
+                        fused_stamp = Image.fromarray(fused_arr).convert("RGBA")
+                        fused_stamp.paste(stamp_img, (stamp_cx, stamp_cy), stamp_img)
+                        fused_arr = np.array(fused_stamp.convert("RGB"))
+
             # Subscribe button overlay — subtle pill at 80% through the last scene's audio
             if is_last_scene and total_duration > 1.0:
                 sub_progress = t / total_duration
@@ -2708,7 +3438,7 @@ class VideoEngine:
                     sub_alpha_factor = min(1.0, (sub_progress - 0.80) / 0.08)  # fade in over 8%
                     btn_w, btn_h = 280, 52
                     btn_x = (1080 - btn_w) // 2
-                    btn_y = 1780
+                    btn_y = 1840  # below the 2-line kinetic subtitle area (1674-1830)
                     btn_bg = (255, 60, 60)  # YouTube red
                     btn_text = "SUBSCRIBE"
                     if sub_alpha_factor > 0.05:
@@ -2863,8 +3593,10 @@ class VideoEngine:
             words_info.append({"word": w, "is_emphasized": is_emp})
         return words_info
 
-    def _create_burn_transition_clip(self, bg_source: Any, duration: float = 0.8) -> 'VideoClip':
-        """Returns a VideoClip that applies a procedural burning-paper transition effect."""
+    def _create_burn_transition_clip(self, bg_source: Any, duration: float = 0.8, flash_image: Optional[Image.Image] = None) -> 'VideoClip':
+        """Returns a VideoClip that applies a procedural burning-paper transition effect.
+        flash_image: optional previous scene card to flash (desaturated, 40% opacity)
+                     during the first 0.1s (Sprint 6 — Transition Memory Flash)."""
         try:
             from moviepy.editor import VideoClip, VideoFileClip
         except ImportError:
@@ -2971,6 +3703,20 @@ class VideoEngine:
             scanlines = np.roll(scanline_overlay, drift, axis=0)
             result = (result * (1 - scanlines)).astype(np.uint8)
 
+            # ── Sprint 6: Transition Memory Flash ──
+            if flash_image is not None and t < 0.1:
+                flash_card = flash_image.copy()
+                flash_arr = np.array(flash_card.convert("RGBA"), dtype=np.float32)
+                gray = flash_arr[:, :, :3].mean(axis=2, keepdims=True)
+                flash_arr[:, :, :3] = gray * 0.5 + flash_arr[:, :, :3] * 0.5
+                flash_arr[:, :, 3] = flash_arr[:, :, 3] * 0.4
+                fx = 540 - 840 // 2
+                fy = 900 - 890 // 2
+                flash_pil = Image.fromarray(flash_arr.astype(np.uint8))
+                fused_pil = Image.fromarray(result).convert("RGBA")
+                fused_pil.paste(flash_pil, (fx, fy), flash_pil)
+                result = np.array(fused_pil.convert("RGB"))
+
             return result
 
         clip = VideoClip(make_frame, duration=duration)
@@ -2985,7 +3731,12 @@ class VideoEngine:
             clip.close = custom_close
         return clip
 
-    def _create_transition_clip(self, bg_source: Any, duration: float = 0.5) -> 'VideoClip':
+    def _create_transition_clip(self, bg_source: Any, duration: float = 0.5, flash_image: Optional[Image.Image] = None) -> 'VideoClip':
+        """
+        Returns a VideoClip that applies a glitchy VHS-style transition effect.
+        flash_image: optional previous scene card to flash (desaturated, 40% opacity)
+                     during the first 0.1s (Sprint 6 — Transition Memory Flash).
+        """
         try:
             from moviepy.editor import VideoClip, VideoFileClip
         except ImportError:
@@ -3047,7 +3798,24 @@ class VideoEngine:
             drift = int(t * 240) % 4
             scanlines = np.roll(scanline_overlay, drift, axis=0)
             fused_arr = (fused_arr * (1 - scanlines)).astype(np.uint8)
-            
+
+            # ── Sprint 6: Transition Memory Flash ──
+            if flash_image is not None and t < 0.1:
+                # Desaturated, 40% opacity flash of the previous card
+                flash_card = flash_image.copy()
+                # Convert to grayscale via desaturation
+                flash_arr = np.array(flash_card.convert("RGBA"), dtype=np.float32)
+                gray = flash_arr[:, :, :3].mean(axis=2, keepdims=True)
+                flash_arr[:, :, :3] = gray * 0.5 + flash_arr[:, :, :3] * 0.5  # partial desaturate
+                flash_arr[:, :, 3] = flash_arr[:, :, 3] * 0.4  # 40% opacity
+                # Center in frame (840x890 card centered at x=540, y=900)
+                fx = 540 - 840 // 2
+                fy = 900 - 890 // 2
+                flash_pil = Image.fromarray(flash_arr.astype(np.uint8))
+                fused_pil = Image.fromarray(fused_arr).convert("RGBA")
+                fused_pil.paste(flash_pil, (fx, fy), flash_pil)
+                fused_arr = np.array(fused_pil.convert("RGB"))
+
             return fused_arr
             
         clip = VideoClip(make_frame, duration=duration)
@@ -3189,7 +3957,7 @@ class VideoEngine:
                         active_block = b
                         break
                 if active_block:
-                    self._render_srt_subtitle_block(draw, bumper_font, active_block["text"], y_pos=1450)
+                    self._render_srt_subtitle_block(draw, bumper_font, active_block["text"], y_pos=1310)
 
         # Draw episode badge on starting bumper
             if episode_num is not None:
@@ -3316,7 +4084,7 @@ class VideoEngine:
                 if active_block:
                     fused_img = Image.fromarray(fused_arr)
                     draw = ImageDraw.Draw(fused_img)
-                    self._render_srt_subtitle_block(draw, bumper_font, active_block["text"], y_pos=1450)
+                    self._render_srt_subtitle_block(draw, bumper_font, active_block["text"], y_pos=1310)
                     fused_arr = np.array(fused_img)
 
             # CRT Power-Off collapse transition in the last 0.15 seconds of the video
@@ -3527,7 +4295,11 @@ class VideoEngine:
                     audio_clip=audio_clips[audio_idx],
                     mid_roll_word_indices=None,
                     is_last_scene=(i == scene_count - 1),
-                    audio_path=audio_paths[audio_idx]
+                    audio_path=audio_paths[audio_idx],
+                    # Sprint B: Emotion beats + File Stamp + Category theme
+                    emotion_beats=self._generate_emotion_beats(scene_texts[i], i, audio_durations[audio_idx], delay_offset),
+                    stamp_text=(lambda lbl: "DEBUNKED" if "MYTH" in (lbl or "").upper() else "ANOMALOUS" if "ANOMAL" in (lbl or "").upper() else "VERIFIED")(scene_labels[i] if i == scene_count - 1 else None),
+                    category=category,
                 )
                 # We do not set the audio on individual content video clips to prevent MoviePy from dropping offsets.
                 scene_clips.append(s_clip)
@@ -3544,11 +4316,12 @@ class VideoEngine:
                 if i < scene_count - 1:
                     next_bg = bg_videos[i + 1] if (i + 1) < len(bg_videos) else bg_videos[i]
                     use_burn = random.random() < 0.5
+                    flash_mem = cards[i] if i < len(cards) else None  # previous scene card
                     if use_burn:
-                        t_clip = self._create_burn_transition_clip(bg_source=next_bg, duration=TRANSITION_DURATION * 1.5)
+                        t_clip = self._create_burn_transition_clip(bg_source=next_bg, duration=TRANSITION_DURATION * 1.5, flash_image=flash_mem)
                         burn_transition_times.append(current_start)
                     else:
-                        t_clip = self._create_transition_clip(bg_source=next_bg, duration=TRANSITION_DURATION)
+                        t_clip = self._create_transition_clip(bg_source=next_bg, duration=TRANSITION_DURATION, flash_image=flash_mem)
                     transition_clips.append(t_clip)
                     clip_sequence.append(t_clip)
                     current_start += TRANSITION_DURATION
@@ -3958,13 +4731,13 @@ class VideoEngine:
                 
                 if not is_truth:
                     if topic:
-                        label = f"EXHIBIT A: {topic.upper()[:32]} MYTH" if not is_bizarre else f"CASE FILE: {topic.upper()[:32]}"
+                        label = "EXHIBIT A"
                     else:
                         label = st["anomaly_label"] if (is_bizarre and category == "bizarre") else st["myth_label"]
                     status = "STATUS: DEBUNKED MYTH" if not is_bizarre else "STATUS: ANOMALOUS RECORD"
                 else:
                     if topic:
-                        label = "EXHIBIT B: THE REALITY" if not is_bizarre else "EXHIBIT B: THE REVEAL"
+                        label = "EXHIBIT B"
                     else:
                         label = st["truth_label"]
                     status = "STATUS: VERIFIED FACT" if not is_bizarre else "STATUS: DECLASSIFIED TRUTH"
@@ -3975,7 +4748,8 @@ class VideoEngine:
                     status_text=status,
                     is_truth=is_truth,
                     style_dict=st,
-                    topic=topic or ""
+                    topic=topic or "",
+                    add_redactions=(i == 0)
                 )
                 cards.append(card)
             
@@ -4031,7 +4805,11 @@ class VideoEngine:
                     audio_clip=content_audio_clips[i],
                     mid_roll_word_indices=mid_roll_word_indices,
                     is_last_scene=(i == n - 1),
-                    audio_path=audio_paths[i+1] if len(audio_paths) == n + 2 else audio_paths[i]
+                    audio_path=audio_paths[i+1] if len(audio_paths) == n + 2 else audio_paths[i],
+                    # Sprint B: Emotion beats + File Stamp + Category theme
+                    emotion_beats=self._generate_emotion_beats(scene_texts[i], i, content_durations[i], delay_offset),
+                    stamp_text=(lambda lbl: "DEBUNKED" if "MYTH" in (lbl or "").upper() else "ANOMALOUS" if "ANOMAL" in (lbl or "").upper() else "VERIFIED")(scene_labels[i] if i == n - 1 else None),
+                    category=category,
                 )
                 
                 # We do not set the audio on individual content video clips to prevent MoviePy from dropping offsets.
@@ -4040,11 +4818,12 @@ class VideoEngine:
                 # If not the last scene, create transition clip
                 if i < n - 1:
                     use_burn = random.random() < 0.5
+                    flash_mem = cards[i] if i < len(cards) else None  # previous scene card
                     if use_burn:
-                        t_clip = self._create_burn_transition_clip(bg_source=bg_video_clips[i+1], duration=0.75)
+                        t_clip = self._create_burn_transition_clip(bg_source=bg_video_clips[i+1], duration=0.75, flash_image=flash_mem)
                         burn_transition_times.append(scene_timelines[i]["start"] + scene_timelines[i]["duration"])
                     else:
-                        t_clip = self._create_transition_clip(bg_source=bg_video_clips[i+1], duration=0.5)
+                        t_clip = self._create_transition_clip(bg_source=bg_video_clips[i+1], duration=0.5, flash_image=flash_mem)
                     transition_clips.append(t_clip)
                     
             # ---- Concatenate all clips ----

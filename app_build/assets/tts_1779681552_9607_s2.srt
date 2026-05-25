@@ -1,0 +1,16 @@
+1
+00:00:00,000 --> 00:00:01,571
+Shaving is a surface job.
+
+2
+00:00:01,571 --> 00:00:06,058
+It can't change the hair follicle buried
+deep in your skin, which is what
+
+3
+00:00:06,058 --> 00:00:08,601
+actually controls thickness and color.
+
+4
+00:00:08,601 --> 00:00:10,920
+You've been tricked by bad geometry.

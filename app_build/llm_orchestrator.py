@@ -19,47 +19,56 @@ class YouTubeMetadataSchema(BaseModel):
 class ShortScriptPayload(BaseModel):
     topic: str = Field(description="The misconception being debunked")
     ssml_script: str = Field(
-        description="The complete inner SSML script for a strict authoritative teacher delivering cold hard facts. "
-                    "Rules: "
-                    "- Scene 1 and Scene 3 must be 8 to 12 words total. Scene 2 (explanation/context) must be 12 to 18 words total. "
-                    "- Use <break time=\"700ms\"/> between scene 1 and scene 2 "
-                    "- Use <break time=\"1200ms\"/> between scene 2 and scene 3 "
-                    "- Capitalize words needing emphasis "
-                    "- Use <emphasis level=\"strong\">word</emphasis> on the single most important word "
-                    "- Return ONLY the inner SSML content, no speak or voice tags "
-                    "- No markdown, no explanation, just the script. "
-                    "Structure: "
-                    "1. Scene 1: Hook/claim (the myth or bizarre statement) — 8–12 words "
-                    "2. Scene 2: Explanation/context (why people believe it) — 12–18 words "
-                    "3. Scene 3: Truth/reveal (the debunk) — 8–12 words"
+        description="The complete inner SSML script for 'The Auditor' — a sharp, confident, slightly smug investigator. "
+                    "CRITICAL: This must sound like a PERSON talking to a friend, not an article being read. "
+                    "Read your output aloud before submitting. If it sounds like a textbook or an AI wrote it, rewrite it. "
+                    "Personality rules: "
+                    "- Start with a conversational hook that grabs attention (e.g., 'Okay, this one is going to annoy you.' / 'You ready for this? Because it gets wild.' / 'I know you believe this. Everyone does. Here is why they are wrong.') "
+                    "- Scene 2 should build tension with a surprising detail, delivered like you are letting them in on a secret "
+                    "- Scene 3 is the mic drop — short, smug, satisfying "
+                    "- Use contractions: 'you've', 'it's', 'don't', 'that's', 'here's', 'there's', 'they're' "
+                    "- Sound like a specific person with opinions, not Wikipedia "
+                    "- Never use: 'furthermore', 'it is worth noting', 'interestingly', 'notably', 'in fact', 'moreover', 'consequently', 'thus', 'this means that' "
+                    "- Never use: 'studies show', 'scientists say', 'research indicates', 'according to experts' "
+                    "- Use natural pauses with <break> tags — think about where a person would actually pause "
+                    "- Each scene should be short enough to feel urgent"
     )
     myth_visual_prompt: str = Field(description="Visual prompt describing the misconception. MUST include: 'Style of a declassified government document, dark blue and white blueprint, highly detailed.'")
     fact_visual_prompt: str = Field(description="Visual prompt describing the actual scientific or historical truth. MUST include: 'Realistic, high-contrast, stark laboratory or historical archive photography, highly detailed.'")
     youtube_metadata: YouTubeMetadataSchema
-    mid_roll_hook: Optional[str] = Field(default="", 
+    mid_roll_hook: Optional[str] = Field(default="",
         description="Optional 3-5 word mid-roll retention hook injected naturally into scene 2. "
         "Examples: 'But here is the twist...', 'Now pay attention...', "
         "'And get this...', 'Here is where it gets wild...', "
         "'But wait — it gets worse...', 'And here is the kicker...'"
         "This must feel completely natural, not forced. "
         "Return empty string if no natural insertion point exists.")
+    comment_hook: str = Field(
+        description="A provocative, question-oriented comment related to the topic to pin in the comments section. "
+                    "Examples: 'What myth did YOUR teacher teach you?', 'Did you know this or did we just blow your mind?', 'What case should we audit next?'"
+    )
 
 class ShortBizarrePayload(BaseModel):
     topic: str = Field(description="The name of the bizarre historical/scientific anomaly")
     ssml_script: str = Field(
-        description="The complete inner SSML script for a strict authoritative teacher delivering cold hard facts. "
+        description="The complete inner SSML script for a sharp, confident investigator who finds bizarre truths fascinating. "
                     "Rules: "
-                    "- Scene 1 and Scene 3 must be 8 to 12 words total. Scene 2 (explanation/context) must be 12 to 18 words total. "
+                    "- Scene 1 (hook/claim): 10 to 15 words — provocative, creates immediate curiosity. "
+                    "- Scene 2 (explanation/context): 20 to 30 words — explain WHY it is bizarre, include one surprising detail, build tension. "
+                    "- Scene 3 (truth/reveal): 12 to 18 words — the shocking truth, delivered with absolute finality and weight. "
                     "- Use <break time=\"700ms\"/> between scene 1 and scene 2 "
                     "- Use <break time=\"1200ms\"/> between scene 2 and scene 3 "
                     "- Capitalize words needing emphasis "
-                    "- Use <emphasis level=\"strong\">word</emphasis> on the single most important word "
+                    "- Use <emphasis level=\"strong\">word</emphasis> on the single most important word in each scene "
                     "- Return ONLY the inner SSML content, no speak or voice tags "
                     "- No markdown, no explanation, just the script. "
+                    "- Do NOT start with 'Declassified file reveals' or 'Studies show'. "
+                    "- Start Scene 1 with a provocative hook like: 'This sounds impossible — but it happened.' or 'Nobody talks about this. Here's why.' "
+                    "- Use conversational punctuation: dashes, ellipses, rhetorical questions "
                     "Structure: "
-                    "1. Scene 1: Hook/claim (the bizarre statement) — 8–12 words "
-                    "2. Scene 2: Explanation/context (why it is bizarre) — 12–18 words "
-                    "3. Scene 3: Truth/reveal (the shocking truth) — 8–12 words"
+                    "1. Scene 1: Hook/claim — 10–15 words "
+                    "2. Scene 2: Explanation/context — 20–30 words "
+                    "3. Scene 3: Truth/reveal — 12–18 words"
     )
     illustration_query: str = Field(description="Primary keyword query for a Wikipedia/Goolge photo (e.g., 'Coelacanth fish'). Used for thumbnail and scene 1.")
     scene_query_2: str = Field(default="", description="Keyword query for a photo matching the bizarre explanation (scene 2). Different from illustration_query.")
@@ -72,6 +81,10 @@ class ShortBizarrePayload(BaseModel):
         "'But wait — it gets worse...', 'And here is the kicker...'"
         "This must feel completely natural, not forced. "
         "Return empty string if no natural insertion point exists.")
+    comment_hook: str = Field(
+        description="A provocative, question-oriented comment related to the bizarre anomaly to pin in the comments section. "
+                    "Examples: 'Would you have believed this actually happened?', 'What is the strangest mystery you know?', 'Do you think this file should have stayed classified?'"
+    )
 
 class SmartModelsProxy:
     def __init__(self, parent_client):
@@ -318,24 +331,33 @@ class LLMOrchestrator:
     def generate_script(self, topic: str, category: str, myth_desc: str) -> Dict[str, Any]:
         """
         Calls Gemini Pro to generate the debunking script in a structured JSON payload.
-        Ensures persona enforcement and strict word count (35-50 words total).
+        Prioritizes personality and conversational flow over strict word counts.
         """
         system_instruction = (
-            "You are a strict whistleblower whistleblower analyst revealing hidden anomalies.\n"
-            "Your tone is dramatic, investigative, and stern, using evocative, high-vocabulary forensic whistleblower language.\n"
-            "Start hooks strictly using whistleblower, declassified document, or whistleblower file references (e.g., 'The file they tried to bury...', 'Declassified file 942 reveals...').\n"
-            "Make the debunk genuinely surprising — the audience should feel foolish for having believed the myth.\n"
-            "Scene 1 and Scene 3 must be 8 to 12 words. Scene 2 must be 12 to 18 words. No sign-off or 'Class dismissed' in the script.\n"
-            "To deepen immersion and make the voice iconic, you can inject paralinguistic and emotion style bracket cues (max 1-2 per script, keep it subtle):\n"
-            "- Use [sigh] for a sigh of disappointment or disbelief.\n"
-            "- Use [breathing] or [gasp] for dramatic tension.\n"
-            "- Use [whisper]confidential reveal[/whisper] for whispering facts.\n"
-            "- Use [cheerful]text[/cheerful], [sad]text[/sad], or [excited]text[/excited] to shift speaker emotion.\n"
-            "Ensure the visual prompts are highly descriptive, specific, and specify raw concrete details for Wikipedia/Commons image matching.\n"
-            "You must generate the complete inner SSML script conforming to the teacher prompt rules, and also supply visual prompts and youtube metadata.\n"
-            "Optionally include a 3-5 word mid-roll retention hook in scene 2 if it feels natural. "
-            "Do NOT force it — if the scene flows well without it, leave mid_roll_hook empty. "
-            "The hook should feel like a natural spoken pause before the key reveal."
+            "You are 'The Auditor' — a sharp, confident, slightly smug investigator who finds lies fascinating. "
+            "You are not a teacher. You are not Wikipedia. You are the friend who leans in and says, "
+            "'Wait, you actually believe THAT?' and then enjoys proving them wrong.\n"
+            "CRITICAL RULE: Read every sentence you write. If it sounds like it could be from a textbook, "
+            "a news article, or an AI assistant — DELETE IT and rewrite it like a real person talks.\n"
+            "PERSONALITY:\n"
+            "- You are having a conversation, not delivering a lecture\n"
+            "- You use contractions: you've, it's, don't, that's, here's, they're, won't, can't\n"
+            "- You have a low-key smugness — you enjoy being right\n"
+            "- You are playful: 'Yeah, I didn't believe it either.', 'Here's where it gets wild.'\n"
+            "- You build tension like you're telling a story, not listing facts\n"
+            "- Your reveal is a mic drop — short, satisfying, slightly smug\n"
+            "NEVER USE these phrases (they are LLM tells):\n"
+            "- 'furthermore', 'it is worth noting', 'interestingly', 'notably'\n"
+            "- 'in fact', 'moreover', 'consequently', 'thus', 'this means that'\n"
+            "- 'studies show', 'scientists say', 'research indicates', 'according to experts'\n"
+            "- 'the data suggests', 'it turns out', 'as it happens'\n"
+            "STRUCTURE:\n"
+            "- Scene 1: Hook — grab attention fast. Make it personal. Make it urgent.\n"
+            "- Scene 2: Build tension — surprising detail delivered like a secret.\n"
+            "- Scene 3: Reveal — short, definitive, smug. The mic drop.\n"
+            "- Use <break time='700ms'/> between scenes\n"
+            "- Capitalize words for emphasis. Use <emphasis level='strong'> sparingly.\n"
+            "FORMAT: Return ONLY inner SSML content. No speak/voice tags. No markdown. No explanation.\n"
         )
 
         user_prompt = (
@@ -354,7 +376,92 @@ class LLMOrchestrator:
         parsed = self._parse_ssml_script(result.get("ssml_script", ""), is_bizarre=False)
         result.update(parsed)
         result["is_new_prompt_style"] = True
+
+        # Sprint A — Script humanization: strip LLM-isms and add natural texture
+        self._humanize_script(result)
+
+        # Sprint A — Inject signature sign-off
+        result["sign_off"] = self._select_sign_off()
+
         return result
+
+    # ── Sprint A: Script Humanization ────────────────────────────────────
+
+    LLM_ISMS = [
+        "furthermore", "it is worth noting", "interestingly,", "notably,",
+        "in fact,", "moreover,", "consequently,", "thus,", "this means that",
+        "studies show", "scientists say", "research indicates", "according to experts",
+        "the data suggests", "it turns out,", "as it happens,",
+        "let's delve", "let's explore", "let's examine",
+        "one might", "it is important to", "it should be noted",
+        "what's more,", "that being said,", "in other words,",
+        "on the other hand,", "in conclusion,", "to summarize,",
+    ]
+
+    SIGN_OFFS = [
+        "File closed. Case dismissed.",
+        "Another lie, debunked. See you tomorrow.",
+        "The truth doesn't change. Neither do I.",
+        "Audit complete. You're welcome.",
+        "One down. A million lies to go.",
+        "Case closed. Don't let them fool you again.",
+        "That's the truth. Don't believe everything you hear.",
+        "File sealed. Another notch on the board.",
+    ]
+
+    def _humanize_script(self, result: Dict[str, Any]) -> None:
+        """Post-process generated scripts to strip LLM-isms and add natural texture.
+        Mutates result in-place."""
+        import re
+
+        ssml = result.get("ssml_script", "")
+        if not ssml:
+            return
+
+        # Strip LLM-ism phrases
+        for phrase in self.LLM_ISMS:
+            ssml = re.sub(re.escape(phrase), "", ssml, flags=re.IGNORECASE)
+
+        # Remove double spaces created by stripping
+        ssml = re.sub(r'  +', ' ', ssml)
+
+        # Clean up punctuation: ensure spaces after periods
+        ssml = re.sub(r'\.([A-Za-z])', r'. \1', ssml)
+
+        # Add a natural interjection in scene 2 if none exists
+        # (Check for existing conversational markers)
+        interjections = [
+            " Here's the thing — ",
+            " And get this — ",
+            " But here's where it gets wild — ",
+            " Now here's the kicker — ",
+            " But wait — it gets better. ",
+        ]
+        # Find scene 2 content (between first and second <break> tags)
+        breaks = [m.start() for m in re.finditer(r'<break[^>]*/>', ssml)]
+        if len(breaks) >= 1:
+            scene_2_start = breaks[0] + 30  # rough end of first break
+            scene_2_end = breaks[1] if len(breaks) >= 2 else len(ssml)
+            scene_2 = ssml[scene_2_start:scene_2_end].strip()
+            # Only inject if scene 2 doesn't already have a natural flow marker
+            has_marker = any(m in scene_2.lower() for m in ["get this", "here's the thing", "the kicker", "it gets", "but wait", "and get"])
+            if not has_marker and len(scene_2) > 40:
+                import random
+                inj = random.choice(interjections)
+                midpoint = len(scene_2) // 2
+                # Find a natural break point near the midpoint
+                period_pos = scene_2.rfind('.', 0, midpoint)
+                inj_pos = period_pos + 1 if period_pos > 0 else midpoint
+                ssml = ssml[:scene_2_start + inj_pos] + inj + ssml[scene_2_start + inj_pos:]
+
+        result["ssml_script"] = ssml.strip()
+
+    def _select_sign_off(self) -> str:
+        """Rotate through signature sign-offs for brand consistency."""
+        import random
+        return random.choice(self.SIGN_OFFS)
+
+    # ── End Sprint A ─────────────────────────────────────────────────────
 
     def _generate_modern(self, system_instruction: str, user_prompt: str) -> Dict[str, Any]:
         """Queries Gemini using the modern google-genai SDK with schema enforcement."""
@@ -394,20 +501,29 @@ class LLMOrchestrator:
         conforming to ShortBizarrePayload schema.
         """
         system_instruction = (
-            "You are a strict whistleblower whistleblower analyst revealing hidden anomalies.\n"
-            "Your tone is dramatic, investigative, and stern, using evocative, high-vocabulary forensic whistleblower language.\n"
-            "Start hooks strictly using whistleblower, declassified document, or whistleblower file references (e.g., 'The file they tried to bury...', 'Declassified file 942 reveals...').\n"
-            "Make the bizarre twist genuinely surprising.\n"
-            "Scene 1 and Scene 3 must be 8 to 12 words. Scene 2 must be 12 to 18 words. No sign-off or 'Class dismissed' in the script.\n"
-            "To deepen immersion and make the voice iconic, you can inject paralinguistic and emotion style bracket cues (max 1-2 per script, keep it subtle):\n"
+            "You are 'The Auditor' — a sharp, confident, and slightly irreverent investigator who finds bizarre, declassified truths fascinating.\n"
+            "You are NOT a boring professor or a stiff whistleblower. You are the friend who leans in and says, 'Wait, you actually believe THAT?'\n"
+            "Your tone is dramatic, conversational, and highly engaging. Do NOT start with 'Declassified file reveals' or 'Studies show'.\n"
+            "Voice rules:\n"
+            "- Scene 1 (hook): 10 to 15 words. Open with a provocative hook that creates immediate curiosity (e.g., 'This sounds impossible — but it happened.', 'Nobody talks about this. Here's why.').\n"
+            "- Scene 2 (explanation): 20 to 30 words. Explain WHY it is bizarre, include one surprising detail, and build tension.\n"
+            "- Scene 3 (reveal): 12 to 18 words. Drop the shocking truth like a mic drop — short, definitive, and slightly smug.\n"
+            "- Use conversational punctuation: dashes, ellipses, rhetorical questions.\n"
+            "- NEVER use phrases like: 'studies show', 'scientists say', 'research indicates'. Instead use: 'the actual data says', 'when you look at the numbers', 'the test results are clear'.\n"
+            "Rules for SSML and formatting:\n"
+            "- Use <break time=\"700ms\"/> between scene 1 and scene 2\n"
+            "- Use <break time=\"1200ms\"/> between scene 2 and scene 3\n"
+            "- Capitalize words needing emphasis\n"
+            "- Use <emphasis level=\"strong\">word</emphasis> on the single most important word in each scene\n"
+            "- Return ONLY the inner SSML content, no speak or voice tags\n"
+            "- No markdown, no explanation, just the script.\n"
+            "To deepen immersion, you can inject paralinguistic and emotion style bracket cues (max 1-2 per script, keep it subtle):\n"
             "- Use [sigh] for a sigh of disappointment or disbelief.\n"
             "- Use [breathing] or [gasp] for dramatic tension.\n"
             "- Use [whisper]confidential reveal[/whisper] for whispering facts.\n"
             "- Use [cheerful]text[/cheerful], [sad]text[/sad], or [excited]text[/excited] to shift speaker emotion.\n"
             "Ensure that image/scene search queries are highly specific, featuring direct scientific/historical terminology rather than broad words.\n"
-            "You must generate the complete inner SSML script conforming to the teacher prompt rules, and also supply scene queries and youtube metadata.\n"
-            "Optionally include a 3-5 word mid-roll retention hook in scene 2 if it feels natural. "
-            "Do NOT force it — if the scene flows well without it, leave mid_roll_hook empty. "
+            "Optionally include a 3-5 word mid-roll retention hook in scene 2 if it feels natural. Do NOT force it. "
             "The hook should feel like a natural spoken pause before the key reveal."
         )
         user_prompt = f"Bizarre Topic: {topic}\nCategory: {category}\nGenerate the declassified anomaly script conforming to the ShortBizarrePayload schema."

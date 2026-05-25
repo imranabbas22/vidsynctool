@@ -7,6 +7,7 @@ import time
 import argparse
 import random
 import re
+import datetime
 from dotenv import load_dotenv
 
 # Load local environment parameters
@@ -19,11 +20,11 @@ from video_engine import VideoEngine, STYLE_PRESETS
 from data_scraper import DataScraper
 
 CTA_ROTATION = [
-    "Subscribe. Tomorrow, I expose another lie.",
-    "Subscribe — we expose a new lie EVERY. SINGLE. DAY.",
-    "Join the truth-seekers. New declassified files daily.",
-    "Hit subscribe — or keep believing the lies.",
-    "The truth does not declassify itself. Neither does your sub button.",
+    "That was today's audit. Subscribe — the next file is already open.",
+    "Case closed. Follow for tomorrow's declassified truth.",
+    "Audit complete. Subscribe — we expose one lie every single day.",
+    "File sealed. Hit follow — tomorrow's case is worse.",
+    "Subscribe now. The truth does not wait.",
 ]
 
 STYLES = ["blueprint", "blueprint", "chalkboard", "classified", "cyberpunk", "retro_vhs", "terminal"]
@@ -87,6 +88,45 @@ def split_myth_ssml(ssml_script, hook_clean, context_clean, fact_clean):
     s1_ssml = re.sub(r'\s+', ' ', s1_ssml).strip()
     s2_ssml = re.sub(r'\s+', ' ', s2_ssml).strip()
     s3_ssml = re.sub(r'\s+', ' ', s3_ssml).strip()
+
+    # Guard: redistribute if any scene is empty (e.g. script too short for 3 scenes)
+    scenes = [s1_ssml, s2_ssml, s3_ssml]
+    non_empty = [s for s in scenes if s]
+    if len(non_empty) == 2:
+        longer_idx = 0 if len(non_empty[0]) >= len(non_empty[1]) else 1
+        orig_longer_idx = next(i for i, s in enumerate(scenes) if s == non_empty[longer_idx])
+        empty_idx = next(i for i, s in enumerate(scenes) if not s)
+        longer_text = scenes[orig_longer_idx]
+        sentences = re.split(r'(?<=[.!?])\s+', longer_text)
+        if len(sentences) >= 2:
+            split_point = len(sentences) // 2
+            first_half = ' '.join(sentences[:split_point])
+            second_half = ' '.join(sentences[split_point:])
+        else:
+            mid = len(longer_text) // 2
+            first_half = longer_text[:mid]
+            second_half = longer_text[mid:]
+        scenes[orig_longer_idx] = first_half.strip()
+        scenes[empty_idx] = second_half.strip()
+    elif len(non_empty) == 1:
+        sentences = re.split(r'(?<=[.!?])\s+', non_empty[0])
+        if len(sentences) >= 3:
+            each = len(sentences) // 3
+            parts = [' '.join(sentences[i*each:(i+1)*each]) for i in range(3)]
+            for i in range(3):
+                scenes[i] = parts[i].strip()
+        elif len(sentences) >= 2:
+            scenes[0] = ' '.join(sentences[:1])
+            scenes[1] = ' '.join(sentences[1:])
+            scenes[2] = scenes[1]
+        else:
+            scenes[0] = scenes[1] = scenes[2] = non_empty[0]
+    elif len(non_empty) == 0:
+        scenes[0] = hook_clean.strip()
+        scenes[1] = context_clean.strip()
+        scenes[2] = fact_clean.strip()
+
+    s1_ssml, s2_ssml, s3_ssml = [s for s in scenes]
     return s1_ssml, s2_ssml, s3_ssml
 
 
@@ -148,6 +188,45 @@ def split_bizarre_ssml(ssml_script, hook_clean, why_bizarre, closing_statement):
     s1_ssml = re.sub(r'\s+', ' ', s1_ssml).strip()
     s2_ssml = re.sub(r'\s+', ' ', s2_ssml).strip()
     s3_ssml = re.sub(r'\s+', ' ', s3_ssml).strip()
+
+    # Guard: redistribute if any scene is empty (e.g. script too short for 3 scenes)
+    scenes = [s1_ssml, s2_ssml, s3_ssml]
+    non_empty = [s for s in scenes if s]
+    if len(non_empty) == 2:
+        longer_idx = 0 if len(non_empty[0]) >= len(non_empty[1]) else 1
+        orig_longer_idx = next(i for i, s in enumerate(scenes) if s == non_empty[longer_idx])
+        empty_idx = next(i for i, s in enumerate(scenes) if not s)
+        longer_text = scenes[orig_longer_idx]
+        sentences = re.split(r'(?<=[.!?])\s+', longer_text)
+        if len(sentences) >= 2:
+            split_point = len(sentences) // 2
+            first_half = ' '.join(sentences[:split_point])
+            second_half = ' '.join(sentences[split_point:])
+        else:
+            mid = len(longer_text) // 2
+            first_half = longer_text[:mid]
+            second_half = longer_text[mid:]
+        scenes[orig_longer_idx] = first_half.strip()
+        scenes[empty_idx] = second_half.strip()
+    elif len(non_empty) == 1:
+        sentences = re.split(r'(?<=[.!?])\s+', non_empty[0])
+        if len(sentences) >= 3:
+            each = len(sentences) // 3
+            parts = [' '.join(sentences[i*each:(i+1)*each]) for i in range(3)]
+            for i in range(3):
+                scenes[i] = parts[i].strip()
+        elif len(sentences) >= 2:
+            scenes[0] = ' '.join(sentences[:1])
+            scenes[1] = ' '.join(sentences[1:])
+            scenes[2] = scenes[1]
+        else:
+            scenes[0] = scenes[1] = scenes[2] = non_empty[0]
+    elif len(non_empty) == 0:
+        scenes[0] = hook_clean.strip()
+        scenes[1] = context_clean.strip()
+        scenes[2] = fact_clean.strip()
+
+    s1_ssml, s2_ssml, s3_ssml = [s for s in scenes]
     return s1_ssml, s2_ssml, s3_ssml
 
 
@@ -168,15 +247,29 @@ def run_pipeline():
         print("[Local] ERROR: --prompt is required when --type is 'dynamic'")
         sys.exit(1)
 
+    THEME_DAYS = {
+        "Monday": {"type": "myth", "category": "Biology", "name": "Medical Myths Monday"},
+        "Tuesday": {"type": "bizarre", "category": "History", "name": "Time Warp Tuesday"},
+        "Wednesday": {"type": "bizarre", "category": "Biology", "name": "Weird Science Wednesday"},
+        "Thursday": {"type": "myth", "category": "History", "name": "Textbook Lies Thursday"},
+        "Friday": {"type": "myth", "category": "History", "name": "Friday Files"},
+        "Saturday": {"type": "bizarre", "category": "Astronomy", "name": "Strange But True Saturday"},
+        "Sunday": {"type": "myth", "category": "Physics", "name": "Sunday Audit"},
+    }
+
     selected_types = []
+    category_filter = None
     if args.type:
         if args.type == "all":
             selected_types = ["myth", "bizarre"]
         else:
             selected_types = [args.type]
     else:
-        # Default: pick one randomly with weighted probabilities
-        selected_types = [random.choices(["myth", "bizarre"], weights=[0.60, 0.40], k=1)[0]]
+        day_of_week = datetime.datetime.now().strftime("%A")
+        day_info = THEME_DAYS.get(day_of_week, {"type": "myth", "category": None, "name": "General Audit"})
+        selected_types = [day_info["type"]]
+        category_filter = day_info.get("category")
+        print(f"[Local] Theme Days Selection: Today is {day_of_week} ({day_info['name']}) -> Format: {day_info['type'].upper()}, Category Filter: {category_filter}")
     print(f"[Local] Production Target Formats Selected: {[t.upper() for t in selected_types]}")
 
     # Select a random visual style for variety (weighted: blueprint 50%, chalkboard 25%, classified 25%)
@@ -234,7 +327,7 @@ def run_pipeline():
         if video_type == "myth":
             # Retrieve next unused misconception
             try:
-                topic, category, description = ingestion.fetch_unused_misconception(gemini_client=client_ref)
+                topic, category, description = ingestion.fetch_unused_misconception(gemini_client=client_ref, category_filter=category_filter)
                 print(f"[Local] Selected Myth Topic: '{topic}' | Discipline: {category}")
             except Exception as e:
                 print(f"[Local] CRITICAL: Ingestion failed to retrieve misconception: {e}")
@@ -247,8 +340,10 @@ def run_pipeline():
             try:
                 print("[Local] Calling Gemini to construct structured short script...")
                 script_payload = orchestrator.generate_script(topic, category, description)
+                episode_num = ingestion.get_next_episode()
+                script_payload["episode_num"] = episode_num
                 word_count = LLMOrchestrator.calculate_word_count(script_payload)
-                print(f"[Local] Script generated successfully. Word count: {word_count}")
+                print(f"[Local] Script generated successfully. Word count: {word_count} | Episode: {episode_num}")
             except Exception as e:
                 print(f"[Local] ERROR: Script generation failed: {e}")
                 sys.exit(1)
@@ -269,14 +364,19 @@ def run_pipeline():
             # Generate 5 audio files: [starting, s1, s2, s3, ending]
             audio_paths = []
             try:
-                # --- Starting bumper TTS ---
-                starting_text = "Now, bringing you the strangest MYTH that will shock you."
-                starting_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{starting_text}</prosody>"
+                # --- Starting bumper TTS (kept short for retention) ---
+                starting_text = random.choice([
+                    "Classified file just dropped.",
+                    "New audit. Pay attention.",
+                    "Another lie exposed today.",
+                    "Declassified. Watch carefully.",
+                ])
+                starting_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{starting_text}</prosody>"
                 print(f"[Local] Myth Starting Bumper: '{starting_text}'")
 
                 # --- Ending bumper TTS ---
                 ending_text = f"{cta_text} CLASS DISMISSED."
-                ending_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{ending_text}</prosody>"
+                ending_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{ending_text}</prosody>"
                 print(f"[Local] Myth Ending Bumper: '{ending_text}'")
 
                 # Determine raw ssml script
@@ -296,19 +396,22 @@ def run_pipeline():
                     ssml_raw, hook_clean, context_clean, fact_clean
                 )
                 
-                s1_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s1_ssml}</prosody>"
-                s2_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s2_ssml}</prosody>"
-                s3_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s3_ssml}</prosody>"
+                # Per-scene prosody: urgent hook, measured explanation, heavy reveal
+                s1_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.97'>{s1_ssml}</prosody>"
+                s2_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.88'>{s2_ssml}</prosody>"
+                s3_ssml_wrapped = f"<prosody pitch='-1.5st' rate='0.85'>{s3_ssml}</prosody>"
                 
                 print(f"[Local] Myth Scene 1 SSML: {s1_ssml_wrapped}")
                 print(f"[Local] Myth Scene 2 SSML: {s2_ssml_wrapped}")
                 print(f"[Local] Myth Scene 3 SSML: {s3_ssml_wrapped}")
                 
-                # Build 3-element audio paths for content scenes (bumpers are pre-rendered)
+                # Build 5-element audio paths for content scenes and bumpers
                 audio_paths = [
+                    asset_gen.generate_tts_audio(starting_ssml_wrapped, f"tts_{timestamp}_start", is_ssml=True),
                     asset_gen.generate_tts_audio(s1_ssml_wrapped, f"tts_{timestamp}_s1", is_ssml=True),
                     asset_gen.generate_tts_audio(s2_ssml_wrapped, f"tts_{timestamp}_s2", is_ssml=True),
                     asset_gen.generate_tts_audio(s3_ssml_wrapped, f"tts_{timestamp}_s3", is_ssml=True),
+                    asset_gen.generate_tts_audio(ending_ssml_wrapped, f"tts_{timestamp}_end", is_ssml=True),
                 ]
             except Exception as e:
                 print(f"[Local] ERROR: Asset Generator failed to create scene TTS MP3s: {e}")
@@ -335,7 +438,13 @@ def run_pipeline():
                 image_truth_path = None
 
             meta = script_payload.get("youtube_metadata", {})
-            title = meta.get("title", f"The Daily Audit: {topic} #Shorts")
+            raw_title = meta.get("title", f"The Daily Audit: {topic} #Shorts")
+            if episode_num is not None:
+                title = f"EP.{episode_num} — {raw_title}"
+            else:
+                title = raw_title
+            if "youtube_metadata" in script_payload:
+                script_payload["youtube_metadata"]["title"] = title
             clean_title = re.sub(r'[<>:"/\\|?*#]', '', title).strip().replace(' ', '_')[:100]
 
             try:
@@ -347,7 +456,7 @@ def run_pipeline():
                 video_path = video_eng.compile_short(image_myth_path, image_truth_path, audio_paths, script_payload, video_name, category, style=video_style, video_type="myth")
                 print(f"[Local] Video assembled and saved successfully: {video_path}")
                 # Generate thumbnail using actual video images
-                video_eng.generate_thumbnail(topic, hook_clean, video_name, style=video_style, img_myth_path=image_myth_path, img_truth_path=image_truth_path)
+                video_eng.generate_thumbnail(topic, hook_clean, video_name, style=video_style, img_myth_path=image_myth_path, img_truth_path=image_truth_path, episode_num=episode_num)
             except Exception as e:
                 print(f"[Local] ERROR: Video engine compilation failed: {e}")
                 sys.exit(1)
@@ -360,7 +469,7 @@ def run_pipeline():
         elif video_type == "bizarre":
             # 1. Retrieve bizarre topic
             try:
-                topic, category, description = ingestion.fetch_unused_bizarre_topic(gemini_client=client_ref)
+                topic, category, description = ingestion.fetch_unused_bizarre_topic(gemini_client=client_ref, category_filter=category_filter)
                 print(f"[Local] Selected Anomaly Topic: '{topic}' | Discipline: {category}")
             except Exception as e:
                 print(f"[Local] CRITICAL: Ingestion failed to retrieve bizarre topic: {e}")
@@ -372,7 +481,9 @@ def run_pipeline():
             try:
                 print("[Local] Calling Gemini to construct bizarre fact script payload...")
                 bizarre_payload = orchestrator.generate_bizarre_fact(topic, category)
-                print(f"[Local] Anomaly script generated: '{bizarre_payload.get('hook')}'")
+                episode_num = ingestion.get_next_episode()
+                bizarre_payload["episode_num"] = episode_num
+                print(f"[Local] Anomaly script generated: '{bizarre_payload.get('hook')}' | Episode: {episode_num}")
             except Exception as e:
                 print(f"[Local] ERROR: Anomaly script generation failed: {e}")
                 sys.exit(1)
@@ -427,14 +538,19 @@ def run_pipeline():
             
             audio_paths = []
             try:
-                # --- Starting bumper TTS ---
-                starting_text = "Now, bringing you the most BIZARRE TRUTH that will shock you."
-                starting_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{starting_text}</prosody>"
+                # --- Starting bumper TTS (kept short for retention) ---
+                starting_text = random.choice([
+                    "Classified file just dropped.",
+                    "New audit. Pay attention.",
+                    "Something bizarre just surfaced.",
+                    "Declassified. Watch carefully.",
+                ])
+                starting_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{starting_text}</prosody>"
                 print(f"[Local] Bizarre Starting Bumper: '{starting_text}'")
 
                 # --- Ending bumper TTS ---
                 ending_text = f"{cta_text} CLASS DISMISSED."
-                ending_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{ending_text}</prosody>"
+                ending_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{ending_text}</prosody>"
                 print(f"[Local] Bizarre Ending Bumper: '{ending_text}'")
 
                 # Determine raw ssml script
@@ -454,18 +570,21 @@ def run_pipeline():
                     ssml_raw, hook_clean, why_bizarre, closing_statement
                 )
                 
-                s1_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s1_ssml}</prosody>"
-                s2_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s2_ssml}</prosody>"
-                s3_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.93'>{s3_ssml}</prosody>"
+                # Per-scene prosody: urgent hook, measured explanation, heavy reveal
+                s1_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.97'>{s1_ssml}</prosody>"
+                s2_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.88'>{s2_ssml}</prosody>"
+                s3_ssml_wrapped = f"<prosody pitch='-1.5st' rate='0.85'>{s3_ssml}</prosody>"
                 
                 print(f"[Local] Bizarre Scene 1 SSML: {s1_ssml_wrapped}")
                 print(f"[Local] Bizarre Scene 2 SSML: {s2_ssml_wrapped}")
                 print(f"[Local] Bizarre Scene 3 SSML: {s3_ssml_wrapped}")
                 
                 audio_paths = [
+                    asset_gen.generate_tts_audio(starting_ssml_wrapped, f"bizarre_tts_{timestamp}_start", is_ssml=True),
                     asset_gen.generate_tts_audio(s1_ssml_wrapped, f"bizarre_tts_{timestamp}_s1", is_ssml=True),
                     asset_gen.generate_tts_audio(s2_ssml_wrapped, f"bizarre_tts_{timestamp}_s2", is_ssml=True),
                     asset_gen.generate_tts_audio(s3_ssml_wrapped, f"bizarre_tts_{timestamp}_s3", is_ssml=True),
+                    asset_gen.generate_tts_audio(ending_ssml_wrapped, f"bizarre_tts_{timestamp}_end", is_ssml=True),
                 ]
             except Exception as e:
                 print(f"[Local] ERROR: Asset Generator failed to create bizarre scene TTS MP3s: {e}")
@@ -479,11 +598,17 @@ def run_pipeline():
                 "cta": cta_text,
                 "starting_text": starting_text,
                 "ending_text": ending_text,
+                "episode_num": episode_num,
             }
-
             # 7. Compile Anomaly Video with multiple scene images
             meta = bizarre_payload.get("youtube_metadata", {})
-            title = meta.get("title", f"Declassified Anomaly: {topic} #Shorts")
+            raw_title = meta.get("title", f"Declassified Anomaly: {topic} #Shorts")
+            if episode_num is not None:
+                title = f"EP.{episode_num} — {raw_title}"
+            else:
+                title = raw_title
+            if "youtube_metadata" in bizarre_payload:
+                bizarre_payload["youtube_metadata"]["title"] = title
             clean_title = re.sub(r'[<>:"/\\|?*#]', '', title).strip().replace(' ', '_')[:100]
             
             try:
@@ -497,7 +622,7 @@ def run_pipeline():
                 video_eng.generate_thumbnail(
                     topic, hook_clean, video_name, style=video_style,
                     img_myth_path=scraped_bizarre_images[0], img_truth_path=scraped_bizarre_images[-1],
-                    bizarre_mode=True,
+                    bizarre_mode=True, episode_num=episode_num
                 )
             except Exception as e:
                 print(f"[Local] ERROR: Video engine compilation failed: {e}")

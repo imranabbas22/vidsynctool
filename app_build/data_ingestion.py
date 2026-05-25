@@ -4,7 +4,11 @@
 import os
 import sqlite3
 import random
+import re
 from typing import List, Tuple, Optional
+
+# Sprint C+: Semantic dedup engine
+from topic_fingerprint import TopicFingerprint
 
 # Predefined premium academic misconceptions to bootstrap the system
 # Curated for surprising, counterintuitive debunks that educated adults genuinely believe.
@@ -46,19 +50,20 @@ BOOTSTRAP_BIZARRE = [
     ("The Shroud of Turin Carbon Dating Controversy", "Physics", "The 1988 radiocarbon dating of the Shroud of Turin gave a 1260-1390 AD date, but subsequent peer-reviewed papers argue the sample was taken from a 16th-century repair patch. In 2005, a chemical analysis found vanillin levels suggesting a much older age."),
 ]
 
+
 class DataIngestion:
     """Manages SQLite database logging and selects unique scientific/historical misconceptions."""
-    
+
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
-            # Place database in app_build/database/
             base_dir = os.path.dirname(os.path.abspath(__file__))
             db_dir = os.path.join(base_dir, "database")
             os.makedirs(db_dir, exist_ok=True)
             self.db_path = os.path.join(db_dir, "audit_history.db")
         else:
             self.db_path = db_path
-            
+
+        self._fingerprint_engine = TopicFingerprint()
         self._init_db()
 
     def _init_db(self):
@@ -94,7 +99,6 @@ class DataIngestion:
 
     def _normalize_topic_tokens(self, text: str) -> set:
         """Normalizes text by lowercasing, removing punctuation, and filtering common stopwords."""
-        import re
         stopwords = {
             'a', 'about', 'above', 'after', 'again', 'against', 'all', 'am', 'an', 'and', 'any', 'are', 'aren', 't',
             'as', 'at', 'be', 'because', 'been', 'before', 'being', 'below', 'between', 'both', 'but', 'by', 'can',
@@ -108,28 +112,29 @@ class DataIngestion:
             'was', 'wasn', 'we', 'were', 'weren', 'what', 'when', 'where', 'which', 'while', 'who', 'whom', 'why',
             'with', 'won', 'would', 'wouldn', 'you', 'your', 'yours', 'yourself', 'yourselves'
         }
-        # Lowercase and replace non-alphanumeric chars with spaces
         text_clean = re.sub(r'[^a-zA-Z0-9\s]', ' ', text.lower())
         tokens = [w.strip() for w in text_clean.split() if w.strip()]
-        # Filter stopwords
         content_tokens = {w for w in tokens if w not in stopwords}
         return content_tokens
 
     def _is_similar(self, topic1: str, topic2: str) -> bool:
-        """Determines if two topics are semantically or lexically similar based on token overlaps."""
+        """Determines if two topics are semantically or lexically similar."""
+        # PRIMARY: use fingerprint-based semantic dedup (catches same topic, different words)
+        if self._fingerprint_engine.is_duplicate(topic1, topic2):
+            return True
+
+        # FALLBACK: Jaccard overlap (catches lexically identical topics)
         tokens1 = self._normalize_topic_tokens(topic1)
         tokens2 = self._normalize_topic_tokens(topic2)
         if not tokens1 or not tokens2:
             return False
-        
+
         intersection = tokens1.intersection(tokens2)
         union = tokens1.union(tokens2)
-        
         jaccard = len(intersection) / len(union) if len(union) > 0 else 0
         min_len = min(len(tokens1), len(tokens2))
         containment = len(intersection) / min_len if min_len > 0 else 0
-        
-        # Deduplicate if Jaccard similarity is > 0.45 or Containment is > 0.70 (with at least 2 tokens)
+
         if jaccard > 0.45:
             return True
         if containment > 0.70 and len(intersection) >= 2:
@@ -137,16 +142,16 @@ class DataIngestion:
         return False
 
     def is_topic_used(self, topic: str, check_bootstrap: bool = False) -> bool:
-        """Checks if a topic has already been logged (normalizes unicode dashes/quotes)."""
+        """Checks if a topic has already been logged (uses fingerprint + Jaccard)."""
         normalized = topic.replace('\u2014', ' - ').replace('\u2013', ' - ').replace('\u2019', "'").strip()
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT topic FROM audit_history")
             db_topics = [row[0] for row in cursor.fetchall()]
-            
+
         target_lower = topic.lower().strip()
         target_norm_lower = normalized.lower().strip()
-        
+
         # Check against database history
         for db_topic in db_topics:
             db_lower = db_topic.lower().strip()
@@ -154,8 +159,9 @@ class DataIngestion:
             if db_lower == target_lower or db_norm == target_norm_lower:
                 return True
             if self._is_similar(topic, db_topic):
+                print(f"[Ingestion] Fingerprint dedup: '{topic[:50]}' ∼ '{db_topic[:50]}'")
                 return True
-                
+
         # Optional: check against bootstrap lists to prevent duplicating preset options
         if check_bootstrap:
             bootstrap_topics = [t for t, _, _ in BOOTSTRAP_MYTHS] + [t for t, _, _ in BOOTSTRAP_BIZARRE]
@@ -165,18 +171,15 @@ class DataIngestion:
                 if bs_lower == target_lower or bs_norm == target_norm_lower:
                     return True
                 if self._is_similar(topic, bs_topic):
+                    print(f"[Ingestion] Fingerprint dedup (bootstrap): '{topic[:50]}' ∼ '{bs_topic[:50]}'")
                     return True
-                    
+
         return False
 
     def log_uploaded_topic(self, topic: str, hook: str,
                             style_preset: str = "", video_type: str = "",
                             transition_type: str = ""):
-        """
-        Logs a topic to prevent duplicates. Updates hook if already logged.
-        Records A/B test metadata (style preset, video type, transition type)
-        for correlation with analytics data.
-        """
+        """Logs a topic to prevent duplicates. Updates hook if already logged."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -192,63 +195,100 @@ class DataIngestion:
             )
             conn.commit()
 
-    def get_next_bootstrap_topic(self) -> Optional[Tuple[str, str, str]]:
-        """Retrieves the next unused misconception from the pre-defined bootstrap list."""
-        shuffled = list(BOOTSTRAP_MYTHS)  # Copy to avoid mutating shared global
+    def get_next_bootstrap_topic(self, category_filter: Optional[str] = None) -> Optional[Tuple[str, str, str]]:
+        """Retrieves the next unused misconception from bootstrap lists."""
+        shuffled = list(BOOTSTRAP_MYTHS)
         random.shuffle(shuffled)
         for topic, category, description in shuffled:
             if not self.is_topic_used(topic):
-                return topic, category, description
+                if category_filter is None or category.lower() == category_filter.lower():
+                    return topic, category, description
+        if category_filter is not None:
+            for topic, category, description in shuffled:
+                if not self.is_topic_used(topic):
+                    return topic, category, description
         return None
 
-    def fetch_unused_misconception(self, gemini_client=None) -> Tuple[str, str, str]:
+    def _get_all_excluded_topics(self) -> List[str]:
+        """Get all topics ever used: DB history + bootstrap lists."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT topic FROM audit_history")
+            used = [row[0] for row in cursor.fetchall()]
+        bootstrap = [t for t, _, _ in BOOTSTRAP_MYTHS] + [t for t, _, _ in BOOTSTRAP_BIZARRE]
+        return used + bootstrap
+
+    def fetch_unused_misconception(self, gemini_client=None, category_filter: Optional[str] = None,
+                                    analytics_logger: Optional[object] = None) -> Tuple[str, str, str]:
         """
         Main interface to fetch the next unused misconception.
-        If all bootstrap myths are exhausted, it utilizes the Gemini Client to generate
-        a set of new unique academic myths. If that fails, it raises an exception to end the script.
+        If all bootstrap myths are exhausted, Gemini generates a new one.
+        Uses semantic fingerprint dedup and structured Gemini context to prevent duplicates.
         """
-        bootstrap = self.get_next_bootstrap_topic()
+        effective_category = category_filter
+        if category_filter is None and analytics_logger is not None:
+            all_categories = sorted(set(c for _, c, _ in BOOTSTRAP_MYTHS + BOOTSTRAP_BIZARRE))
+            try:
+                effective_category = analytics_logger.select_weighted_category(all_categories)
+                print(f"[Ingestion] Diversity-weighted category selection: '{effective_category}' "
+                      f"(filter was None)")
+            except Exception as e:
+                print(f"[Ingestion] WARNING: Category selection failed: {e}")
+                effective_category = None
+
+        bootstrap = self.get_next_bootstrap_topic(category_filter=effective_category)
         if bootstrap:
             return bootstrap
 
-        # Fallback: bootstrap registry exhausted, generate dynamic topic using Gemini
         if gemini_client is None:
             raise RuntimeError(
-                "[Ingestion] Predefined bootstrap myths are exhausted, but no Gemini Client was provided "
-                "to generate new topics dynamically."
+                "[Ingestion] Predefined bootstrap myths exhausted, but no Gemini Client provided."
             )
 
-        print("[Ingestion] Predefined myths exhausted. Autonomously generating a new myth using Gemini...")
+        print("[Ingestion] Predefined myths exhausted. Generating a new unique myth using Gemini...")
         try:
             new_myth = self._generate_dynamic_myth_via_gemini(gemini_client)
             if new_myth:
                 return new_myth
             else:
-                raise RuntimeError(
-                    "[Ingestion] Gemini returned an empty or invalid myth format (expected Topic|Category|Description)."
-                )
+                raise RuntimeError("[Ingestion] Gemini returned empty or invalid myth.")
         except Exception as e:
-            raise RuntimeError(f"[Ingestion] Autonomously generating a new myth failed: {e}") from e
+            raise RuntimeError(f"[Ingestion] Dynamic myth generation failed: {e}") from e
 
-    def _verify_topic_robustness(self, topic: str, category: str, description: str, gemini_client) -> bool:
+    def _verify_topic_robustness(self, topic: str, category: str, description: str,
+                                  gemini_client, existing_topics: List[str]) -> bool:
         """
-        Uses Gemini to verify that the generated topic is factually true, scientifically/historically robust,
-        highly engaging, and not a trivial or commonly known fact.
+        Verifies a generated topic is: factually correct, genuinely surprising,
+        and meaningfully different from everything already covered.
         """
+        # First: fingerprint check against ALL existing topics
+        if existing_topics:
+            is_dup, match, score = self._fingerprint_engine.is_duplicate_against_all(
+                topic, existing_topics
+            )
+            if is_dup:
+                print(f"[Ingestion] WORLDLINESS CHECK: '{topic[:40]}' too similar to '{match[:40]}' "
+                      f"(score={score:.2f}) — rejecting")
+                return False
+
+        # Then ask Gemini to validate factuality + "woah" factor
         prompt = (
-            f"You are a strict, elite fact-checker and content quality editor.\n"
-            f"Analyze the following proposed topic for an educational video:\n"
-            f"Topic: {topic}\n"
-            f"Category: {category}\n"
-            f"Description: {description}\n\n"
+            f"You are a strict, elite fact-checker and content quality editor. "
+            f"Analyze the following proposed topic for an educational myth-busting video:\n"
+            f"Topic: {topic}\nCategory: {category}\nDescription: {description}\n\n"
             f"Evaluate based on these rules:\n"
-            f"1. Is the debunk or claim 100% factually correct and supported by solid historical or scientific evidence? (It must contain truth, no pseudoscience or unverified speculation).\n"
-            f"2. Is it a 'genius' topic? (i.e. is it counterintuitive, highly surprising, and intellectually stimulating, rather than boring or common knowledge?)\n"
-            f"3. Is the topic description clear, accurate, and direct?\n\n"
+            f"1. Is this factually 100% correct and backed by solid evidence? (NO pseudoscience or speculation)\n"
+            f"2. Is this a 'woah' topic? — Is it genuinely surprising, counterintuitive, "
+            f"and something educated adults would actually believe? A myth that makes people "
+            f"say 'Wait, THAT's not true?!'\n"
+            f"3. Is it obscure enough? NOT a top-10-list fact everyone knows. "
+            f"It should feel like being let in on a secret.\n"
+            f"4. Is the description clear, snappy, and interesting?\n\n"
             f"Respond strictly in one of these two formats:\n"
-            f"VALID|Reason why this is a high-quality, verified, and surprising topic.\n"
-            f"INVALID|Reason why it fails (e.g. factually incorrect, too common, boring, or speculative).\n"
-            f"Do not include any other markdown, labels, or formatting."
+            f"VALID|Reason why this is a high-quality, surprising, verified topic that will wow viewers.\n"
+            f"INVALID|Reason why it fails (e.g. factually wrong, too boring/common, not surprising enough, "
+            f"too similar to a well-known fact, or just not that interesting).\n"
+            f"Do not include any other formatting."
         )
         try:
             response = gemini_client.models.generate_content(
@@ -264,34 +304,36 @@ class DataIngestion:
                 print(f"[Ingestion] Topic validation FAILED: {reason}")
                 return False
         except Exception as e:
-            # If the validation API call fails, we log it and fallback to True so we don't block execution
-            print(f"[Ingestion] Topic validation failed to execute API call: {e}. Defaulting to True.")
+            print(f"[Ingestion] Topic validation API call failed: {e}. Defaulting to True.")
             return True
 
     def _generate_dynamic_myth_via_gemini(self, gemini_client) -> Optional[Tuple[str, str, str]]:
-        """Invokes Gemini to generate a novel historical/scientific myth not present in database."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT topic FROM audit_history")
-            used_topics = [row[0] for row in cursor.fetchall()]
+        """
+        Generates a novel myth using Gemini with STRUCTURED context.
+        Instead of dumping 100 topics as a wall of text, groups them by entity.
+        """
+        all_excluded = self._get_all_excluded_topics()
 
-        # Include both DB and bootstrap lists in exclusions
-        bootstrap_topics = [t for t, _, _ in BOOTSTRAP_MYTHS] + [t for t, _, _ in BOOTSTRAP_BIZARRE]
-        all_exclusions = used_topics + bootstrap_topics
-        exclusion_str = ", ".join(all_exclusions) if all_exclusions else "None"
-        
+        # Build structured Gemini context using fingerprint engine
+        exclusion_context = TopicFingerprint.build_gemini_context(all_excluded)
+
         prompt = (
             f"Generate a single extremely robust, intellectually premium ('genius'), and counterintuitive misconception "
             f"that educated adults genuinely believe, which contains clear scientific or historical truth. "
-            f"Choose from: Physics, Biology, History, Astronomy, Neuroscience, Psychology, Economics, Geology, Chemistry, Technology, Linguistics, Anthropology.\n"
+            f"This will be the topic of a YouTube Short. It needs to make people say 'WHOA, I didn't know that!'\n\n"
+            f"Choose from: Physics, Biology, History, Astronomy, Neuroscience, Psychology, Economics, Geology, "
+            f"Chemistry, Technology, Linguistics, Anthropology.\n\n"
+            f"{exclusion_context}\n"
             f"Requirements:\n"
-            f"1. Absolutely must NOT be semantically similar to or cover the same subject/event as any of these topics: [{exclusion_str}]\n"
-            f"2. The misconception must be rigorously true and backed by verifiable academic sources (science or history).\n"
-            f"3. Avoid cliché, overused, or simple myths (e.g. Einstein failing math, 10% brain myth, goldfish memory, glass flowing, toilet flush Coriolis effect, humans having 5 senses, pyramids built by slaves, Napoleon's sphinx nose).\n"
-            f"4. Output strictly in the format: Topic|Category|ShortDescription\n"
-            f"5. Do not include markdown, wrappers, or extra explanation."
+            f"1. The misconception must be rigorously true and backed by verifiable academic sources.\n"
+            f"2. It must be genuinely surprising — something well-educated people believe that is TOTALLY wrong.\n"
+            f"3. NOT a 'top 10' common knowledge fact. No 'Einstein failed math' or any myth that's been debunked "
+            f"in a million listicles.\n"
+            f"4. The 'woah' factor: someone watching should feel like they just learned a genuinely valuable secret.\n"
+            f"5. Output strictly in the format: Topic|Category|ShortDescription\n"
+            f"6. Do not include markdown, wrappers, or extra explanation."
         )
-        
+
         for attempt in range(3):
             response = gemini_client.models.generate_content(
                 model='gemini-2.5-flash',
@@ -303,43 +345,56 @@ class DataIngestion:
                 topic, category, description = parts[0].strip(), parts[1].strip(), parts[2].strip()
                 normalized = topic.replace('\u2014', ' - ').replace('\u2013', ' - ').replace('\'', "'").strip()
                 if not self.is_topic_used(normalized, check_bootstrap=True) and not self.is_topic_used(topic, check_bootstrap=True):
-                    if self._verify_topic_robustness(topic, category, description, gemini_client):
+                    if self._verify_topic_robustness(topic, category, description, gemini_client, all_excluded):
                         return topic, category, description
-        
+                    else:
+                        print(f"[Ingestion] Attempt {attempt+1}: topic rejected by validation. Retrying...")
+                else:
+                    print(f"[Ingestion] Attempt {attempt+1}: topic matches existing ({topic[:40]}...). Retrying...")
+
         return None
 
-    def fetch_unused_bizarre_topic(self, gemini_client=None) -> Tuple[str, str, str]:
-        """
-        Retrieves the next unused bizarre fact anomaly. If bootstrap list is exhausted,
-        it utilizes Gemini to discover a novel bizarre fact/anomaly.
-        """
-        shuffled = list(BOOTSTRAP_BIZARRE)  # Copy to avoid mutating shared global
+    def fetch_unused_bizarre_topic(self, gemini_client=None, category_filter: Optional[str] = None,
+                                    analytics_logger: Optional[object] = None) -> Tuple[str, str, str]:
+        """Retrieves the next unused bizarre fact anomaly. Uses fingerprint dedup."""
+        effective_category = category_filter
+        if category_filter is None and analytics_logger is not None:
+            all_categories = sorted(set(c for _, c, _ in BOOTSTRAP_BIZARRE))
+            try:
+                effective_category = analytics_logger.select_weighted_category(all_categories)
+                print(f"[Ingestion] Diversity-weighted bizarre category: '{effective_category}'")
+            except Exception as e:
+                print(f"[Ingestion] WARNING: Bizarre weighting failed: {e}")
+
+        shuffled = list(BOOTSTRAP_BIZARRE)
         random.shuffle(shuffled)
+        for topic, category, description in shuffled:
+            if not self.is_topic_used(topic):
+                if effective_category is None or category.lower() == effective_category.lower():
+                    return topic, category, description
         for topic, category, description in shuffled:
             if not self.is_topic_used(topic):
                 return topic, category, description
 
         if gemini_client is None:
-            raise RuntimeError("[Ingestion] Predefined bootstrap bizarre facts are exhausted, but no Gemini Client was provided.")
+            raise RuntimeError("[Ingestion] Predefined bootstrap bizarre facts exhausted, but no Gemini Client provided.")
 
-        print("[Ingestion] Predefined bizarre facts exhausted. Autonomously generating a new anomaly topic using Gemini...")
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT topic FROM audit_history")
-            used_topics = [row[0] for row in cursor.fetchall()]
+        print("[Ingestion] Predefined bizarre facts exhausted. Generating new anomaly using Gemini...")
+        all_excluded = self._get_all_excluded_topics()
+        exclusion_context = TopicFingerprint.build_gemini_context(all_excluded)
 
-        bootstrap_topics = [t for t, _, _ in BOOTSTRAP_MYTHS] + [t for t, _, _ in BOOTSTRAP_BIZARRE]
-        all_exclusions = used_topics + bootstrap_topics
-        exclusion_str = ", ".join(all_exclusions) if all_exclusions else "None"
-        
         prompt = (
             f"Find a single bizarre, obscure, but rigorously verified scientific or historical anomaly "
             f"that most educated adults have never heard of. "
-            f"Choose from: Physics, Biology, History, Astronomy, Neuroscience, Psychology, Economics, Geology, Chemistry, Technology, Linguistics, Anthropology.\n"
+            f"This will be the topic of a YouTube Short titled 'The Daily Audit'. "
+            f"It needs to make people say 'THAT IS INSANE — how have I never heard of this?!'\n\n"
+            f"Choose from: Physics, Biology, History, Astronomy, Neuroscience, Psychology, Economics, Geology, "
+            f"Chemistry, Technology, Linguistics, Anthropology.\n\n"
+            f"{exclusion_context}\n"
             f"Requirements:\n"
-            f"1. Absolutely must NOT be semantically similar to or cover the same subject/event as any of these topics: [{exclusion_str}]\n"
-            f"2. The anomaly must contain verifiable truth and have specific names, dates, or academic sources.\n"
-            f"3. Avoid cliché anomalies (e.g. the Dancing Plague, Emu War, Coelacanth, Vela Incident, Tunguska Event, Taured Man, Wow! Signal, Kryptos sculpture, London Beer Flood, Phantom Time Hypothesis).\n"
+            f"1. The anomaly must contain verifiable truth with specific names, dates, sources.\n"
+            f"2. It must be GENUINELY bizarre — something so strange it sounds fake but is 100% real.\n"
+            f"3. NOT any anomaly that's gone viral on social media.\n"
             f"4. Output strictly in the format: AnomalyName|Category|Brief 1-sentence description\n"
             f"5. Do not include markdown, wrappers, or extra explanation."
         )
@@ -353,16 +408,30 @@ class DataIngestion:
             if len(parts) >= 3:
                 topic, category, description = parts[0].strip(), parts[1].strip(), parts[2].strip()
                 if not self.is_topic_used(topic, check_bootstrap=True):
-                    if self._verify_topic_robustness(topic, category, description, gemini_client):
+                    if self._verify_topic_robustness(topic, category, description, gemini_client, all_excluded):
                         return topic, category, description
-        
-        # Fallback with dynamic suffix to prevent repeats
-        fallback_topic = f"Bizarre Anomaly #{len(used_topics) + 1}"
+
+        fallback_topic = f"Bizarre Anomaly #{len(all_excluded) + 1}"
         return fallback_topic, "Physics", "A dynamically generated mystery awaiting investigation."
+
+    def get_next_episode(self) -> int:
+        """Retrieves and auto-increments the next episode number from database."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("CREATE TABLE IF NOT EXISTS episode_counter (id INTEGER PRIMARY KEY, next_episode INTEGER DEFAULT 1)")
+            cursor.execute("SELECT next_episode FROM episode_counter WHERE id = 1")
+            row = cursor.fetchone()
+            if row is None:
+                cursor.execute("INSERT INTO episode_counter (id, next_episode) VALUES (1, 2)")
+                conn.commit()
+                return 1
+            next_ep = row[0]
+            cursor.execute("UPDATE episode_counter SET next_episode = ? WHERE id = 1", (next_ep + 1,))
+            conn.commit()
+            return next_ep
 
 
 if __name__ == "__main__":
-    # Self-test database creation
     ingestion = DataIngestion()
     print("Database absolute path:", ingestion.db_path)
     topic = ingestion.fetch_unused_misconception()

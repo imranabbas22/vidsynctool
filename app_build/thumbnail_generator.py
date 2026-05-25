@@ -366,44 +366,144 @@ class ThumbnailDesigner:
         for y in range(0, self.h, spacing):
             draw.line([(0, y), (self.w, y)], fill=color + (opacity,), width=1)
 
+    def _draw_premium_title(self, draw, topic, hook, is_bizarre=False):
+        """Draws a premium multi-line title with pixel-based wrapping.
+        Automatically shrinks font if text exceeds max width (920px)."""
+        accent_color = (0, 200, 255) if is_bizarre else (220, 40, 40)
+        max_width = int(self.w * 0.85)  # 920px on 1080w
+
+        topic_text = (topic if topic else "DECLASSIFIED FILE").upper().strip()
+        hook_text = (hook if hook else "IS A LIE").upper().strip()
+
+        def _render_wrapped_text(text, font_size, y_start, fill_color, outline_color=(10, 10, 30)):
+            font = self._load_font(font_size)
+            words = text.split()
+            lines = []
+            current_line = []
+            for word in words:
+                test_line = " ".join(current_line + [word])
+                line_w = draw.textlength(test_line, font=font)
+                if line_w <= max_width:
+                    current_line.append(word)
+                else:
+                    if current_line:
+                        lines.append(" ".join(current_line))
+                    current_line = [word]
+            if current_line:
+                lines.append(" ".join(current_line))
+
+            # If still too wide, shrink font
+            while lines and any(draw.textlength(l, font=font) > max_width for l in lines):
+                font_size -= 2
+                font = self._load_font(font_size)
+                words = text.split()
+                lines = []
+                current_line = []
+                for word in words:
+                    test_line = " ".join(current_line + [word])
+                    line_w = draw.textlength(test_line, font=font)
+                    if line_w <= max_width:
+                        current_line.append(word)
+                    else:
+                        if current_line:
+                            lines.append(" ".join(current_line))
+                        current_line = [word]
+                if current_line:
+                    lines.append(" ".join(current_line))
+
+            line_height = font_size + 8
+            total_h = len(lines) * line_height
+            y = y_start - total_h // 2
+            for line in lines:
+                lw = draw.textlength(line, font=font)
+                x = (self.w - lw) // 2
+                outline_w = max(2, font_size // 15)
+                for dx in range(-outline_w, outline_w + 1):
+                    for dy in range(-outline_w, outline_w + 1):
+                        if dx != 0 or dy != 0:
+                            draw.text((x + dx, y + dy), line, fill=outline_color + (255,), font=font)
+                draw.text((x, y), line, fill=fill_color + (255,), font=font)
+                y += line_height
+            return y
+
+        # Topic line (white), then hook below (accent)
+        base_font_size_top = int(self.w * 0.055)
+        base_font_size_bot = int(self.w * 0.065)
+        y_top = self.h // 2 - int(self.h * 0.10)
+
+        # Adjust available space: both topic and hook need to fit
+        y_bottom = _render_wrapped_text(
+            topic_text, base_font_size_top, y_top,
+            fill_color=(255, 255, 255)
+        ) + 12
+
+        # If hook would go off-screen, scale down
+        if y_bottom + base_font_size_bot * 3 > self.h:
+            base_font_size_bot = int(base_font_size_bot * 0.8)
+        if y_bottom < y_top + 10:
+            y_bottom = y_top + int(self.h * 0.03)
+
+        _render_wrapped_text(
+            hook_text, base_font_size_bot, y_bottom,
+            fill_color=accent_color
+        )
+
+    def _draw_bottom_accent_bar(self, draw, is_bizarre=False):
+        accent_color = (0, 200, 255) if is_bizarre else (220, 40, 40)
+        bar_h = int(self.h * 0.01)
+        if bar_h < 4:
+            bar_h = 4
+        draw.rectangle([0, self.h - bar_h, self.w, self.h], fill=accent_color + (255,))
+
+    def _draw_episode_badge(self, draw, episode_num, is_bizarre=False):
+        if episode_num is None:
+            return
+        badge_str = f"EP. {episode_num:03d}"
+        badge_font = self._load_font(int(self.w * 0.03))
+        bw = draw.textlength(badge_str, font=badge_font)
+        
+        bx = self.w - bw - int(self.w * 0.08)
+        by = self.h - int(self.h * 0.09)
+        
+        accent_color = (0, 200, 255) if is_bizarre else (220, 40, 40)
+        draw.rounded_rectangle(
+            [bx - 12, by - 6, bx + bw + 12, by + int(self.h * 0.04)],
+            radius=6,
+            fill=(10, 10, 15, 220),
+            outline=accent_color,
+            width=2
+        )
+        draw.text((bx, by), badge_str, fill=(255, 255, 255), font=badge_font)
+
     def generate_from_images(
         self,
         img_myth_path,
         img_truth_path,
         title_text="MYTH vs TRUTH",
+        topic_label="",
+        episode_num=None,
         use_vignette_blur=True,
     ):
         s = NIGHT_DAY
-
-        myth_raw = Image.open(img_myth_path).convert("RGB")
-        truth_raw = Image.open(img_truth_path).convert("RGB")
-
-        myth_filled = self._resize_to_fill(myth_raw, self.w, self.h)
-        truth_filled = self._resize_to_fill(truth_raw, self.w, self.h)
-
-        myth_graded = self._apply_color_grade(
-            myth_filled,
-            tint=s["myth_tint"],
-            tint_strength=s["myth_tint_strength"],
-            desaturate=s["myth_desaturate"],
-            darken=s["myth_darken"],
-        )
-        truth_graded = self._apply_color_grade(
-            truth_filled,
-            tint=s["truth_tint"],
-            tint_strength=s["truth_tint_strength"],
-            brighten=s["truth_brighten"],
-        )
-
-        base = self._composite_diagonal(myth_graded, truth_graded)
+        base_path = img_myth_path if (img_myth_path and os.path.exists(img_myth_path)) else img_truth_path
+        
+        if base_path and os.path.exists(base_path):
+            raw = Image.open(base_path).convert("RGB")
+            filled = self._resize_to_fill(raw, self.w, self.h)
+            graded = self._apply_color_grade(
+                filled,
+                tint=s["myth_tint"],
+                tint_strength=s["myth_tint_strength"],
+                desaturate=s["myth_desaturate"],
+                darken=s["myth_darken"],
+            )
+            base = graded
+        else:
+            base = Image.new("RGB", (self.w, self.h), (15, 10, 35))
 
         base = base.convert("RGBA")
+        
         arr = np.array(base)
-        yy, xx = np.meshgrid(range(self.h), range(self.w), indexing="ij")
-        mask = np.zeros((self.h, self.w), dtype=bool)
-        for y in range(self.h):
-            x_boundary = int(self.w * (1 - y / self.h))
-            mask[y, :x_boundary] = True
         noise_mask = np.random.randint(0, 10000, (self.h, self.w)) < 6000
         noise = np.random.randint(-20, 21, (self.h, self.w, 3))
         arr = arr.astype(np.int16)
@@ -418,22 +518,31 @@ class ThumbnailDesigner:
         self._draw_grid_pattern(od)
         base = Image.alpha_composite(base, overlay)
 
-        seam = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 0))
-        self._draw_seam_line(ImageDraw.Draw(seam))
-        base = Image.alpha_composite(base, seam)
-
         circles = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 0))
         self._draw_accent_circles(ImageDraw.Draw(circles))
         base = Image.alpha_composite(base, circles)
 
         final_draw = ImageDraw.Draw(base)
-        self._draw_side_labels(final_draw)
-        self._draw_graphic_decorations(final_draw)
-        self._draw_center_title(final_draw, title_text)
-        self._draw_stamps(final_draw)
+        
+        self._draw_premium_title(final_draw, topic=topic_label, hook=title_text, is_bizarre=False)
         self._draw_channel_logo(final_draw)
+        self._draw_episode_badge(final_draw, episode_num, is_bizarre=False)
+        self._draw_bottom_accent_bar(final_draw, is_bizarre=False)
+        
         self._draw_light_glare(base)
         self._draw_sparkles(final_draw)
+        
+        # Paste The Lens mascot (right side, reacting to the topic)
+        try:
+            from video_engine import VideoEngine
+            lens_expr = "shocked" if ("MYTH" in (title_text or "").upper() or "is a lie" in (title_text or "").lower()) else "neutral"
+            lens_size = max(80, int(min(self.w, self.h) * 0.11))
+            lens_img = VideoEngine._render_static(size=lens_size, expression=lens_expr)
+            lens_x = self.w - int(self.w * 0.15) - lens_size // 2
+            lens_y = int(self.h * 0.40) - lens_size // 2
+            base.paste(lens_img, (lens_x, lens_y), lens_img)
+        except Exception as e:
+            pass
 
         return base.convert("RGB")
 
@@ -483,115 +592,63 @@ class ThumbnailDesigner:
                 width=1,
             )
 
-    def generate_bizarre_thumbnail(self, bg_image_path=None, title_text="DECLASSIFIED ANOMALY", topic_label=""):
-        base = Image.new("RGB", (self.w, self.h), (10, 8, 15))
-
+    def generate_bizarre_thumbnail(self, bg_image_path=None, title_text="DECLASSIFIED ANOMALY", topic_label="", episode_num=None):
         if bg_image_path and os.path.exists(bg_image_path):
             try:
                 bg_raw = Image.open(bg_image_path).convert("RGB")
                 bg_filled = self._resize_to_fill(bg_raw, self.w, self.h)
                 bg_arr = np.array(bg_filled, dtype=np.float32)
-                dark_arr = bg_arr * 0.30
-                tint_arr = np.array([15, 10, 25], dtype=np.float32)
-                base_arr = dark_arr * 0.8 + tint_arr * 0.2
+                dark_arr = bg_arr * 0.35
+                tint_arr = np.array([10, 15, 30], dtype=np.float32)
+                base_arr = dark_arr * 0.7 + tint_arr * 0.3
                 base_arr = np.clip(base_arr, 0, 255).astype(np.uint8)
                 base = Image.fromarray(base_arr)
             except Exception:
-                base = Image.new("RGB", (self.w, self.h), (10, 8, 15))
+                base = Image.new("RGB", (self.w, self.h), (10, 15, 30))
+        else:
+            base = Image.new("RGB", (self.w, self.h), (10, 15, 30))
 
         base = base.convert("RGBA")
         base = self._draw_vignette(base, strength=0.65)
 
-        half = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 0))
-        hd = ImageDraw.Draw(half)
-        tri_pts = [(0, 0), (self.w, 0), (0, self.h)]
-        hd.polygon(tri_pts, fill=(0, 0, 0, 80))
-        tri_pts_b = [(self.w, self.h), (self.w, 0), (0, self.h)]
-        hd.polygon(tri_pts_b, fill=(255, 255, 255, 30))
-        hd.line([(0, 0), (self.w, self.h)], fill=(255, 255, 255, 180), width=2)
-        dash_len = 15
-        gap_len = 10
-        steps = max(self.w, self.h)
-        toggle = 0
-        for i in range(0, steps, dash_len + gap_len):
-            t1 = i / steps
-            t2 = min(i + dash_len, steps) / steps
-            x1, y1 = int(self.w * t1), int(self.h * t1)
-            x2, y2 = int(self.w * t2), int(self.h * t2)
-            if toggle == 0:
-                hd.line([(x1, y1), (x2, y2)], fill=(255, 60, 60, 200), width=3)
-            toggle ^= 1
-        base = Image.alpha_composite(base, half)
-
         grid = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 0))
         gd = ImageDraw.Draw(grid)
-        self._draw_grid_pattern(gd, color=(180, 80, 80), opacity=8)
+        self._draw_grid_pattern(gd, color=(0, 180, 255), opacity=8)
         base = Image.alpha_composite(base, grid)
+
+        circles = Image.new("RGBA", (self.w, self.h), (0, 0, 0, 0))
+        self._draw_accent_circles(ImageDraw.Draw(circles))
+        base = Image.alpha_composite(base, circles)
 
         draw = ImageDraw.Draw(base)
 
         banner_h = int(self.h * 0.055)
         banner_y = int(self.h * 0.03)
-        draw.rectangle([0, banner_y, self.w, banner_y + banner_h], fill=(180, 30, 30, 220))
+        draw.rectangle([0, banner_y, self.w, banner_y + banner_h], fill=(0, 150, 200, 200))
         banner_font = self._load_font(int(self.w * 0.028))
         banner_text = "[ DECLASSIFIED ANOMALY FILE ]"
         bw = draw.textlength(banner_text, font=banner_font)
         draw.text(((self.w - bw) // 2, banner_y + int(banner_h * 0.15)), banner_text, fill=(255, 255, 255), font=banner_font)
 
-        title_font_size = int(self.w * 0.055)
-        if len(title_text) > 20:
-            title_font_size = int(self.w * 0.042)
-        title_font = self._load_font(title_font_size)
-
-        lines = []
-        words = title_text.split()
-        cur = []
-        max_w = int(self.w * 0.78)
-        for w in words:
-            test = " ".join(cur + [w])
-            if draw.textlength(test, font=title_font) <= max_w:
-                cur.append(w)
-            else:
-                lines.append(" ".join(cur))
-                cur = [w]
-        if cur:
-            lines.append(" ".join(cur))
-
-        lh = title_font_size + 10
-        total_h = len(lines) * lh
-        start_y = self.h // 2 - total_h // 2
-
-        for line in lines:
-            lw = draw.textlength(line, font=title_font)
-            x = (self.w - lw) // 2
-            y = start_y
-            for dx in range(-3, 4):
-                for dy in range(-3, 4):
-                    if dx != 0 or dy != 0:
-                        draw.text((x + dx, y + dy), line, fill=(0, 0, 0, 255), font=title_font)
-            draw.text((x, y), line, fill=(255, 255, 255, 255), font=title_font)
-            start_y += lh
-
-        if topic_label:
-            sub_y = start_y + int(self.h * 0.03)
-            sf = self._load_font(int(self.w * 0.028))
-            sw = draw.textlength(topic_label, font=sf)
-            draw.text(((self.w - sw) // 2, sub_y), topic_label, fill=(200, 180, 160, 200), font=sf)
-
-        stamp_text = "CLASSIFIED"
-        stamp_font = self._load_font(int(self.w * 0.032))
-        sw = draw.textlength(stamp_text, font=stamp_font)
-        pad = int(self.w * 0.015)
-        stamp_img = Image.new("RGBA", (int(sw) + pad * 2, int(self.w * 0.045)), (0, 0, 0, 0))
-        sd = ImageDraw.Draw(stamp_img)
-        sd.rounded_rectangle([0, 0, stamp_img.width, stamp_img.height], radius=3, fill=(180, 30, 30, 190))
-        sd.text((pad, int(stamp_img.height * 0.12)), stamp_text, fill=(255, 255, 255), font=stamp_font)
-        rotated = stamp_img.rotate(15, expand=True, resample=Image.Resampling.BICUBIC)
-        draw._image.paste(rotated, (int(self.w * 0.05), int(self.h * 0.55)), rotated)
-
+        self._draw_premium_title(draw, topic=topic_label, hook=title_text, is_bizarre=True)
         self._draw_channel_logo(draw)
+        self._draw_episode_badge(draw, episode_num, is_bizarre=True)
+        self._draw_bottom_accent_bar(draw, is_bizarre=True)
+
         self._draw_light_glare(base)
         self._draw_sparkles(draw)
+        
+        # Paste The Lens mascot (right side, reacting to the topic)
+        try:
+            from video_engine import VideoEngine
+            lens_expr = "shocked" if ("ANOMALY" in (title_text or "").upper() or "DECLASSIFIED" in (title_text or "").upper()) else "neutral"
+            lens_size = max(80, int(min(self.w, self.h) * 0.11))
+            lens_img = VideoEngine._render_static(size=lens_size, expression=lens_expr)
+            lens_x = self.w - int(self.w * 0.15) - lens_size // 2
+            lens_y = int(self.h * 0.40) - lens_size // 2
+            base.paste(lens_img, (lens_x, lens_y), lens_img)
+        except Exception as e:
+            pass
 
         return base.convert("RGB")
 
@@ -604,12 +661,12 @@ class ThumbnailDesigner:
         return path
 
 
-def generate_bizarre_thumbnail(bg_image_path=None, title="DECLASSIFIED ANOMALY", topic="", output_name="bizarre_thumb"):
+def generate_bizarre_thumbnail(bg_image_path=None, title="DECLASSIFIED ANOMALY", topic="", output_name="bizarre_thumb", episode_num=None):
     short = ThumbnailDesigner(width=1080, height=1920)
-    thumb_short = short.generate_bizarre_thumbnail(bg_image_path, title, topic)
+    thumb_short = short.generate_bizarre_thumbnail(bg_image_path, title, topic, episode_num=episode_num)
     short.save(thumb_short, output_name, "shorts")
     hd = ThumbnailDesigner(width=1280, height=720)
-    thumb_hd = hd.generate_bizarre_thumbnail(bg_image_path, title, topic)
+    thumb_hd = hd.generate_bizarre_thumbnail(bg_image_path, title, topic, episode_num=episode_num)
     hd.save(thumb_hd, f"{output_name}_hd", "youtube")
     print(f"\n[ThumbnailDesigner] Bizarre thumbnails saved to {THUMB_DIR}")
     return os.path.join(THUMB_DIR, "shorts", f"{output_name}.png")
@@ -620,13 +677,15 @@ def generate_thumbnail_with_images(
     img_truth_path,
     title="MYTH vs TRUTH",
     output_name="thumb",
+    topic="",
+    episode_num=None
 ):
     short = ThumbnailDesigner(width=1080, height=1920)
-    thumb_short = short.generate_from_images(img_myth_path, img_truth_path, title)
+    thumb_short = short.generate_from_images(img_myth_path, img_truth_path, title, topic_label=topic, episode_num=episode_num)
     short.save(thumb_short, output_name, "shorts")
 
     hd = ThumbnailDesigner(width=1280, height=720)
-    thumb_hd = hd.generate_from_images(img_myth_path, img_truth_path, title)
+    thumb_hd = hd.generate_from_images(img_myth_path, img_truth_path, title, topic_label=topic, episode_num=episode_num)
     hd.save(thumb_hd, f"{output_name}_hd", "youtube")
 
     print(f"\n[ThumbnailDesigner] Both thumbnails saved to {THUMB_DIR}")

@@ -20,8 +20,8 @@ from asset_generator import AssetGenerator
 from video_engine import VideoEngine, STYLE_PRESETS
 from youtube_uploader import YouTubeUploader
 from facebook_uploader import FacebookUploader
-from tiktok_uploader import TikTokUploader
 from data_scraper import DataScraper
+from analytics_logger import AnalyticsLogger
 
 CTA_ROTATION = [
     "That was today's audit. Subscribe — the next file is already open.",
@@ -122,6 +122,45 @@ def split_myth_ssml(ssml_script, hook_clean, context_clean, fact_clean):
     s1_ssml = re.sub(r'\s+', ' ', s1_ssml).strip()
     s2_ssml = re.sub(r'\s+', ' ', s2_ssml).strip()
     s3_ssml = re.sub(r'\s+', ' ', s3_ssml).strip()
+
+    # Guard: redistribute if any scene is empty (e.g. script too short for 3 scenes)
+    scenes = [s1_ssml, s2_ssml, s3_ssml]
+    non_empty = [s for s in scenes if s]
+    if len(non_empty) == 2:
+        longer_idx = 0 if len(non_empty[0]) >= len(non_empty[1]) else 1
+        orig_longer_idx = next(i for i, s in enumerate(scenes) if s == non_empty[longer_idx])
+        empty_idx = next(i for i, s in enumerate(scenes) if not s)
+        longer_text = scenes[orig_longer_idx]
+        sentences = re.split(r'(?<=[.!?])\s+', longer_text)
+        if len(sentences) >= 2:
+            split_point = len(sentences) // 2
+            first_half = ' '.join(sentences[:split_point])
+            second_half = ' '.join(sentences[split_point:])
+        else:
+            mid = len(longer_text) // 2
+            first_half = longer_text[:mid]
+            second_half = longer_text[mid:]
+        scenes[orig_longer_idx] = first_half.strip()
+        scenes[empty_idx] = second_half.strip()
+    elif len(non_empty) == 1:
+        sentences = re.split(r'(?<=[.!?])\s+', non_empty[0])
+        if len(sentences) >= 3:
+            each = len(sentences) // 3
+            parts = [' '.join(sentences[i*each:(i+1)*each]) for i in range(3)]
+            for i in range(3):
+                scenes[i] = parts[i].strip()
+        elif len(sentences) >= 2:
+            scenes[0] = ' '.join(sentences[:1])
+            scenes[1] = ' '.join(sentences[1:])
+            scenes[2] = scenes[1]
+        else:
+            scenes[0] = scenes[1] = scenes[2] = non_empty[0]
+    elif len(non_empty) == 0:
+        scenes[0] = hook_clean.strip()
+        scenes[1] = context_clean.strip()
+        scenes[2] = fact_clean.strip()
+
+    s1_ssml, s2_ssml, s3_ssml = [s for s in scenes]
     return s1_ssml, s2_ssml, s3_ssml
 
 
@@ -183,6 +222,45 @@ def split_bizarre_ssml(ssml_script, hook_clean, why_bizarre, closing_statement):
     s1_ssml = re.sub(r'\s+', ' ', s1_ssml).strip()
     s2_ssml = re.sub(r'\s+', ' ', s2_ssml).strip()
     s3_ssml = re.sub(r'\s+', ' ', s3_ssml).strip()
+
+    # Guard: redistribute if any scene is empty (e.g. script too short for 3 scenes)
+    scenes = [s1_ssml, s2_ssml, s3_ssml]
+    non_empty = [s for s in scenes if s]
+    if len(non_empty) == 2:
+        longer_idx = 0 if len(non_empty[0]) >= len(non_empty[1]) else 1
+        orig_longer_idx = next(i for i, s in enumerate(scenes) if s == non_empty[longer_idx])
+        empty_idx = next(i for i, s in enumerate(scenes) if not s)
+        longer_text = scenes[orig_longer_idx]
+        sentences = re.split(r'(?<=[.!?])\s+', longer_text)
+        if len(sentences) >= 2:
+            split_point = len(sentences) // 2
+            first_half = ' '.join(sentences[:split_point])
+            second_half = ' '.join(sentences[split_point:])
+        else:
+            mid = len(longer_text) // 2
+            first_half = longer_text[:mid]
+            second_half = longer_text[mid:]
+        scenes[orig_longer_idx] = first_half.strip()
+        scenes[empty_idx] = second_half.strip()
+    elif len(non_empty) == 1:
+        sentences = re.split(r'(?<=[.!?])\s+', non_empty[0])
+        if len(sentences) >= 3:
+            each = len(sentences) // 3
+            parts = [' '.join(sentences[i*each:(i+1)*each]) for i in range(3)]
+            for i in range(3):
+                scenes[i] = parts[i].strip()
+        elif len(sentences) >= 2:
+            scenes[0] = ' '.join(sentences[:1])
+            scenes[1] = ' '.join(sentences[1:])
+            scenes[2] = scenes[1]
+        else:
+            scenes[0] = scenes[1] = scenes[2] = non_empty[0]
+    elif len(non_empty) == 0:
+        scenes[0] = hook_clean.strip()
+        scenes[1] = context_clean.strip()
+        scenes[2] = fact_clean.strip()
+
+    s1_ssml, s2_ssml, s3_ssml = [s for s in scenes]
     return s1_ssml, s2_ssml, s3_ssml
 
 
@@ -196,7 +274,6 @@ def run_pipeline():
     parser = argparse.ArgumentParser(description="TDA Shorts Pipeline Master Script")
     parser.add_argument("--type", choices=["myth", "bizarre", "all", "dynamic"], default=None, help="Specify video format type, 'all' to build all, 'dynamic' for user-prompt-driven, or omit for random weighted selection")
     parser.add_argument("--prompt", type=str, default=None, help="User prompt for dynamic video generation (requires --type dynamic)")
-    parser.add_argument("--skip-tiktok", action="store_true", help="Skip TikTok upload")
     args = parser.parse_args()
 
     if args.type == "dynamic" and not args.prompt:
@@ -228,9 +305,26 @@ def run_pipeline():
         print(f"[Main] Theme Days Selection: Today is {day_of_week} ({day_info['name']}) -> Format: {day_info['type'].upper()}, Category Filter: {category_filter}")
     print(f"[Main] Production Target Formats Selected: {[t.upper() for t in selected_types]}")
 
-    # Select a random visual style for variety (weighted: blueprint 50%, chalkboard 25%, classified 25%)
-    video_style = random.choice(STYLES)
-    print(f"[Main] Visual Style Selected: {video_style.upper()}")
+    # Initialize analytics tracker for data-driven decisions (Sprint 5)
+    try:
+        analytics_tracker = AnalyticsLogger()
+        print(f"[Main] Analytics tracker initialized: {analytics_tracker.log_path}")
+    except Exception as e:
+        print(f"[Main] WARNING: Analytics tracker init failed: {e}")
+        analytics_tracker = None
+
+    # Select a visual style using analytics rotation (A/B style tracking)
+    if analytics_tracker is not None:
+        try:
+            video_style = analytics_tracker.select_rotation_style(STYLES)
+            print(f"[Main] Analytics-rotated Visual Style Selected: {video_style.upper()}"
+                  f" (A/B rotation tracking active)")
+        except Exception:
+            video_style = random.choice(STYLES)
+            print(f"[Main] Visual Style Selected: {video_style.upper()} (fallback random)")
+    else:
+        video_style = random.choice(STYLES)
+        print(f"[Main] Visual Style Selected: {video_style.upper()} (no analytics)")
 
     # Select a random transition type for A/B tracking
     transition_type = random.choice(TRANSITIONS)
@@ -287,7 +381,10 @@ def run_pipeline():
         if video_type == "myth":
             # Retrieve next unused misconception
             try:
-                topic, category, description = ingestion.fetch_unused_misconception(gemini_client=client_ref, category_filter=category_filter)
+                topic, category, description = ingestion.fetch_unused_misconception(
+                    gemini_client=client_ref, category_filter=category_filter,
+                    analytics_logger=analytics_tracker,
+                )
                 print(f"[Main] Selected Myth Topic: '{topic}' | Discipline: {category}")
             except Exception as e:
                 print(f"[Main] CRITICAL: Ingestion failed to retrieve misconception: {e}")
@@ -304,6 +401,7 @@ def run_pipeline():
                 episode_num = ingestion.get_next_episode()
                 script_payload["episode_num"] = episode_num
                 word_count = LLMOrchestrator.calculate_word_count(script_payload)
+                script_payload["word_count"] = word_count
                 print(f"[Main] Script generated successfully. Word count: {word_count} | Episode: {episode_num}")
             except Exception as e:
                 print(f"[Main] ERROR: Script generation failed: {e}")
@@ -335,10 +433,11 @@ def run_pipeline():
                 starting_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{starting_text}</prosody>"
                 print(f"[Main] Myth Starting Bumper: '{starting_text}'")
 
-                # --- Ending bumper TTS ---
-                ending_text = f"{cta_text} CLASS DISMISSED."
+                # --- Ending bumper TTS using signature sign-off ---
+                sign_off = script_payload.get("sign_off", "Class dismissed.")
+                ending_text = f"{cta_text} {sign_off}"
                 ending_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{ending_text}</prosody>"
-                print(f"[Main] Myth Ending Bumper: '{ending_text}'")
+                print(f"[Main] Myth Ending Bumper: '{ending_text}' (sign-off: '{sign_off}')")
 
                 # Determine raw ssml script
                 if "ssml_script" in script_payload:
@@ -450,7 +549,10 @@ def run_pipeline():
         elif video_type == "bizarre":
             # 1. Retrieve bizarre topic
             try:
-                topic, category, description = ingestion.fetch_unused_bizarre_topic(gemini_client=client_ref, category_filter=category_filter)
+                topic, category, description = ingestion.fetch_unused_bizarre_topic(
+                    gemini_client=client_ref, category_filter=category_filter,
+                    analytics_logger=analytics_tracker,
+                )
                 print(f"[Main] Selected Anomaly Topic: '{topic}' | Discipline: {category}")
             except Exception as e:
                 print(f"[Main] CRITICAL: Ingestion failed to retrieve bizarre topic: {e}")
@@ -564,10 +666,11 @@ def run_pipeline():
                 starting_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{starting_text}</prosody>"
                 print(f"[Main] Bizarre Starting Bumper: '{starting_text}'")
 
-                # --- Ending bumper TTS ---
-                ending_text = f"{cta_text} CLASS DISMISSED."
+                # --- Ending bumper using signature sign-off ---
+                sign_off = script_payload.get("sign_off", "Class dismissed.")
+                ending_text = f"{cta_text} {sign_off}"
                 ending_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{ending_text}</prosody>"
-                print(f"[Main] Bizarre Ending Bumper: '{ending_text}'")
+                print(f"[Main] Bizarre Ending Bumper: '{ending_text}' (sign-off: '{sign_off}')")
 
                 # Determine raw ssml script
                 if "ssml_script" in bizarre_payload:
@@ -819,7 +922,6 @@ def run_pipeline():
         base_desc = meta.get("description", f"Educating about {topic}.")
         yt_desc = f"{base_desc}\n\n#TheDailyAudit #Shorts {hashtags_str}"
         fb_desc = f"{base_desc}\n\n#TheDailyAudit #Reels {hashtags_str}"
-        tt_caption = f"{base_desc}\n\n#TheDailyAudit #Shorts #fyp {hashtags_str}"
 
         # Upload to YouTube via API with retry
         yt_upload_success = False
@@ -852,24 +954,8 @@ def run_pipeline():
         except Exception as e:
             print(f"[Main] ERROR: Facebook upload subsystem failed: {e}")
 
-        # Upload to TikTok via Playwright browser (uses Opera GX profile cookies)
-        tt_upload_success = False
-        tt_video_id = None
-        if not getattr(args, 'skip_tiktok', False):
-            try:
-                tt_uploader = TikTokUploader(headless=True)
-                print("[Main] Uploading to TikTok via Playwright (AIGC label enabled)...")
-                @retry_with_backoff(max_retries=2, base_delay=3.0)
-                def _tt_upload():
-                    return tt_uploader.upload(video_path, tt_caption)
-                tt_upload_success, tt_video_id = _tt_upload()
-            except Exception as e:
-                print(f"[Main] ERROR: TikTok upload subsystem failed: {e}")
-        else:
-            print("[Main] TikTok upload skipped (--skip-tiktok flag)")
-
         # Complete transaction: Log history with A/B metadata if successfully uploaded
-        if yt_upload_success or fb_upload_success or tt_upload_success:
+        if yt_upload_success or fb_upload_success:
             try:
                 ingestion.log_uploaded_topic(
                     topic, hook_text,
@@ -879,6 +965,25 @@ def run_pipeline():
                 )
                 print(f"[Main] SUCCESS: Topic '{topic}' permanently retired and logged in database.")
                 print(f"[Main] A/B Data: style={video_style}, type={video_type}, transition={transition_type}")
+                
+                # Log to analytics for cross-session tracking
+                try:
+                    analytics = AnalyticsLogger()
+                    analytics.log_video({
+                        "episode": episode_num,
+                        "topic": topic,
+                        "category": category,
+                        "format": video_type,
+                        "style_preset": video_style,
+                        "transition_type": transition_type,
+                        "word_count": script_payload.get("word_count", 0) if isinstance(script_payload, dict) else 0,
+                        "duration_seconds": None,
+                        "uploaded_at": datetime.utcnow().isoformat() + "Z",
+                        "youtube_video_id": yt_video_id,
+                    })
+                    print(f"[Main] Analytics entry logged.")
+                except Exception as e:
+                    print(f"[Main] WARNING: Failed to log analytics: {e}")
             except Exception as e:
                 print(f"[Main] WARNING: Failed to record upload event in database: {e}")
         else:

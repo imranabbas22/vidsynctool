@@ -2,6 +2,7 @@
 # "The Daily Audit" - Asset Generation Module (TTS & Imagen)
 # =============================================================================
 import os
+import re
 import time
 import random
 import threading
@@ -32,6 +33,241 @@ class AssetGenerator:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         self.assets_dir = os.path.join(base_dir, "assets")
         os.makedirs(self.assets_dir, exist_ok=True)
+
+        # Sprint A — Real voice narration directory
+        self.real_voice_dir = os.path.join(base_dir, "real_voice")
+        os.makedirs(self.real_voice_dir, exist_ok=True)
+
+    # ── Sprint A: Real Voice Narration Pipeline ──────────────────────────
+
+    def check_real_voice_available(self, scene_key: str) -> Optional[str]:
+        """Check if a pre-recorded voice file exists for the given scene key.
+        File naming convention: real_voice/{scene_key}.mp3 or .wav
+        Returns the file path if found, None otherwise.
+        """
+        for ext in [".mp3", ".wav", ".m4a", ".ogg"]:
+            path = os.path.join(self.real_voice_dir, f"{scene_key}{ext}")
+            if os.path.exists(path):
+                return path
+        return None
+
+    def use_real_voice(self, scene_key: str, output_name: str) -> Optional[str]:
+        """Use a pre-recorded voice file instead of TTS.
+        Copies the real voice file to the expected output path and generates
+        estimated word boundaries for subtitle/kinetic rendering.
+        Returns the output path, or None if no real voice file is available.
+        """
+        src_path = self.check_real_voice_available(scene_key)
+        if src_path is None:
+            return None
+
+        import shutil
+        output_path = os.path.join(self.assets_dir, f"{output_name}.mp3")
+        shutil.copy2(src_path, output_path)
+        print(f"[AssetGen] Using real voice recording: {src_path} → {output_path}")
+
+        # Generate estimated word boundaries for subtitle rendering
+        # Strip SSML tags and emotion brackets to get plain text
+        import re
+        plain_text = re.sub(r'<[^>]*>', '', scene_key)
+        plain_text = re.sub(r'\[[\w\s_/-]+\]', '', plain_text).strip()
+
+        # Load the actual audio to get duration for accurate timing
+        try:
+            from moviepy.editor import AudioFileClip
+            clip = AudioFileClip(output_path)
+            duration = clip.duration
+            clip.close()
+        except Exception:
+            duration = 5.0
+
+        words = plain_text.split()
+        if not words:
+            return output_path
+
+        total_chars = sum(len(w) for w in words)
+        sec_per_char = duration / total_chars if total_chars > 0 else 0.1
+
+        word_boundaries = []
+        current_time = 0.0
+        for w in words:
+            word_dur = len(w) * sec_per_char
+            word_boundaries.append({
+                "word": w,
+                "offset_ms": current_time * 1000.0,
+                "duration_ms": word_dur * 1000.0
+            })
+            current_time += word_dur
+
+        self._write_srt_from_word_boundaries(word_boundaries, output_path)
+        return output_path
+
+    def export_script_for_recording(self, script_text: str, episode_num: int, output_dir: Optional[str] = None) -> str:
+        """Export a plain-text script file for voice recording.
+        Strips SSML tags and emotion brackets, returns a clean .txt file
+        that a voice actor can read from.
+        """
+        import re
+        clean = re.sub(r'<[^>]*>', '', script_text)
+        clean = re.sub(r'\[/?\w+\]', '', clean).strip()
+        clean = re.sub(r'  +', ' ', clean)
+
+        if output_dir is None:
+            output_dir = self.real_voice_dir
+        os.makedirs(output_dir, exist_ok=True)
+
+        output_path = os.path.join(output_dir, f"script_ep{episode_num}.txt")
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(clean + "\n\n")
+            f.write("─" * 40 + "\n")
+            f.write(f"Instructions for recording:\n")
+            f.write("1. Read each paragraph above in a natural, conversational tone.\n")
+            f.write("2. Sound like you're telling a friend something shocking.\n")
+            f.write("3. Pause naturally between paragraphs (~0.7-1.2 seconds).\n")
+            f.write("4. The character is 'The Auditor' — sharp, confident, slightly smug.\n")
+            f.write("5. Save as: script_ep{episode_num}.mp3 in this folder.\n")
+            f.write("6. Run pipeline with: python main.py --type myth\n")
+        print(f"[AssetGen] Recording script exported: {output_path}")
+        return output_path
+
+    # ── End Sprint A ─────────────────────────────────────────────────────
+
+    def _generate_edge_tts(self, text: str, output_path: str) -> str:
+        """Generate TTS audio using Edge-TTS (Microsoft free TTS — no API key needed).
+        Falls back to Azure or offline mockup if edge-tts is unavailable.
+        Returns the output path on success, raises on failure.
+        """
+        import edge_tts
+        import json
+        import subprocess
+
+        # Strip SSML tags and bracket cues — edge-tts speaks plain text
+        clean_text = text
+        clean_text = re.sub(r'<[^>]*>', '', clean_text)
+        clean_text = re.sub(r'\[[\w\s_/-]+\]', '', clean_text).strip()
+        # Fix missing spaces after punctuation (prevents "word.Word" being spoken as letters)
+        clean_text = re.sub(r'([.!?])([A-Za-z])', r'\1 \2', clean_text)
+
+        # Map Azure voice name to edge-tts equivalent (same Microsoft voices work)
+        voice = self.voice_name or "en-US-AndrewMultilingualNeural"
+
+        # Use save_sync() — synchronous wrapper around edge-tts
+        if not clean_text.strip():
+            # Empty text — generate short silent placeholder
+            return self._generate_silent_placeholder(output_path, duration_ms=2000)
+
+        communicate = edge_tts.Communicate(clean_text, voice=voice)
+        communicate.save_sync(output_path)
+
+        # Verify file is valid
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise RuntimeError("Edge TTS produced empty output")
+
+        # Get actual audio duration via ffprobe (most accurate)
+        ffprobe_exe = "ffprobe"  # system PATH fallback
+        try:
+            import imageio_ffmpeg
+            ffmpeg_dir = os.path.dirname(imageio_ffmpeg.get_ffmpeg_exe())
+            ffprobe_candidate = os.path.join(ffmpeg_dir, "ffprobe.exe" if os.name == 'nt' else "ffprobe")
+            if os.path.exists(ffprobe_candidate):
+                ffprobe_exe = ffprobe_candidate
+        except (ImportError, Exception):
+            pass
+
+        total_duration_ms = 3000.0  # fallback
+        try:
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            probe = subprocess.run(
+                [ffprobe_exe, "-v", "quiet", "-print_format", "json",
+                 "-show_entries", "format=duration", output_path],
+                capture_output=True, text=True, timeout=10, startupinfo=startupinfo
+            )
+            if probe.returncode == 0:
+                data = json.loads(probe.stdout)
+                duration_sec = float(data["format"]["duration"])
+                total_duration_ms = duration_sec * 1000.0
+        except Exception:
+            pass
+
+        print(f"[AssetGen] Edge TTS audio generated: {output_path} ({total_duration_ms:.0f}ms)")
+
+        # Estimate word boundaries from total duration using base word time + character proportion
+        # Base word time prevents tiny words ("a", "the") from flashing too fast
+        words = clean_text.split()
+        word_boundaries = []
+        if words:
+            base_word_ms = 80
+            num_words = len(words)
+            base_total = num_words * base_word_ms
+            total_chars = sum(len(w) for w in words)
+            remaining = total_duration_ms - base_total
+            if remaining < 0:
+                remaining = total_duration_ms
+                base_total = 0
+            current_ms = 0.0
+            for w in words:
+                char_portion = len(w) / total_chars if total_chars > 0 else 0
+                duration_ms = base_word_ms + remaining * char_portion
+                word_boundaries.append({
+                    "word": w,
+                    "offset_ms": current_ms,
+                    "duration_ms": max(duration_ms, 50)
+                })
+                current_ms += duration_ms
+
+        self._write_srt_from_word_boundaries(word_boundaries, output_path)
+        return output_path
+
+    def _generate_silent_placeholder(self, output_path: str, duration_ms: int = 2000) -> str:
+        """Generate a valid silent MP3 placeholder file of the given duration.
+        Uses ffmpeg anullsrc filter, with base64 fallback."""
+        import subprocess
+        try:
+            import imageio_ffmpeg
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        except ImportError:
+            ffmpeg_exe = "ffmpeg"
+        duration_sec = max(1, duration_ms / 1000.0)
+        try:
+            cmd = [
+                ffmpeg_exe, "-y",
+                "-f", "lavfi",
+                "-i", "anullsrc=r=44100:cl=mono",
+                "-t", str(duration_sec),
+                "-acodec", "libmp3lame",
+                output_path
+            ]
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            subprocess.run(
+                cmd, check=True, startupinfo=startupinfo,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            print(f"[AssetGen] Silent placeholder MP3 ({duration_sec}s) generated: {output_path}")
+        except Exception as ffmpeg_err:
+            print(f"[AssetGen] FFmpeg silent generation failed ({ffmpeg_err}). Writing tiny fallback MP3...")
+            import base64
+            silent_mp3_b64 = (
+                "SUQzBAAAAAAAAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAbXA0MgBUWFhYAAAAEgAAA21pbm9yX3ZlcnNpb24AM"
+                "QBUWFhYAAAAHAAAA2NvbXBhdGlibGVfYnJhbmRzAG1wNDJpc29tAFRFTgAAAA4AAAMAd2RDcmVhdG9yAFAA//"
+                "MUxAAAAAAAAAAAAAAAIEAElgQD5nAPgAADA8A/gQD5gAD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+            )
+            missing_padding = len(silent_mp3_b64) % 4
+            if missing_padding:
+                silent_mp3_b64 += "=" * (4 - missing_padding)
+            with open(output_path, "wb") as f:
+                f.write(base64.b64decode(silent_mp3_b64))
+            print(f"[AssetGen] Fallback tiny silent placeholder MP3 written: {output_path}")
+        # Generate empty SRT
+        self._write_srt_from_word_boundaries([], output_path)
+        return output_path
 
     def _process_brackets_to_ssml(self, text: str) -> str:
         """
@@ -84,6 +320,14 @@ class AssetGenerator:
             with open(srt_path, "w", encoding="utf-8") as f:
                 f.write(srt_content)
             print(f"[AssetGen] Subtitle SRT generated: {srt_path}")
+            
+            # Also save raw word boundaries as JSON for word-level kinetic highlighting
+            if word_boundaries:
+                import json
+                json_path = os.path.splitext(audio_path)[0] + ".words.json"
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(word_boundaries, f, indent=2)
+                print(f"[AssetGen] Word-level timestamps saved: {json_path} ({len(word_boundaries)} words)")
         except Exception as e:
             print(f"[AssetGen] WARNING: Failed to generate subtitle SRT: {e}")
 
@@ -121,14 +365,20 @@ class AssetGenerator:
 
     def generate_tts_audio(self, text: str, output_name: str, is_ssml: bool = False) -> str:
         """
-        Synthesizes script text into an MP3 file using Microsoft Azure Cognitive Services Speech SDK.
-        Uses voice specified by self.voice_name (defaults to en-US-AndrewMultilingualNeural).
-        Supports SSML for dramatic phrasing, stern pausing, and rate modulation.
+        Synthesizes script text into an MP3 file.
+        Cascade: Edge TTS (free, no API key) → Azure SDK → Azure REST → Offline mockup.
+        Uses voice specified by self.voice_name.
         Processes bracket tags like [sigh] or [whisper]...[/whisper] to enrich narration.
         """
         output_path = os.path.join(self.assets_dir, f"{output_name}.mp3")
-        
-        # Pre-process brackets into Azure SSML tags
+
+        # ── Cascade 0: Edge TTS (free, no API key, good quality) ──────────
+        try:
+            return self._generate_edge_tts(text, output_path)
+        except Exception as edge_err:
+            print(f"[AssetGen] Edge TTS unavailable ({edge_err}). Falling back to Azure...")
+
+        # Pre-process brackets into Azure SSML tags (for Azure/offline fallback)
         text_with_cues = self._process_brackets_to_ssml(text)
         
         # Format the text into standard Azure Speech SSML
@@ -228,9 +478,10 @@ class AssetGenerator:
                         self._write_srt_from_word_boundaries(word_boundaries, output_path)
                         return output_path
                     else:
-                        details = speechsdk.SpeechSynthesisCancellationDetails.from_result(result)
+                        # SDK 1.50+: cancellation_details is a property on the result object
+                        details = result.cancellation_details if hasattr(result, 'cancellation_details') else None
                         error_msg = f"Azure SDK Synthesis failed: {result.reason}"
-                        if details.reason == speechsdk.CancellationReason.Error:
+                        if details and details.reason == speechsdk.CancellationReason.Error:
                             error_msg += f" (Error details: {details.error_details})"
                         raise RuntimeError(error_msg)
                         

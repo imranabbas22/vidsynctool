@@ -40,8 +40,11 @@ class YouTubeUploader:
             from google_auth_oauthlib.flow import InstalledAppFlow
             from google.auth.transport.requests import Request
 
-            # Define the minimum upload scope
-            scopes = ["https://www.googleapis.com/auth/youtube.upload"]
+            # Define the minimum upload and comment moderation scopes
+            scopes = [
+                "https://www.googleapis.com/auth/youtube.upload",
+                "https://www.googleapis.com/auth/youtube.force-ssl"
+            ]
             creds = None
 
             # 1. Load cached credentials if they exist
@@ -116,6 +119,61 @@ class YouTubeUploader:
         except Exception as e:
             print(f"[Uploader] Critical upload failure: {e}")
             return False, str(e)
+
+    def post_and_pin_comment(self, video_id: str, comment_text: str) -> bool:
+        """
+        Posts a comment on the specified YouTube video and attempts to pin it.
+        """
+        if not os.path.exists(self.client_secrets_path):
+            print(f"[Uploader] Simulation Mode: Mock pinning comment '{comment_text}' on mock video {video_id}")
+            return True
+            
+        try:
+            import googleapiclient.discovery
+            from google.oauth2.credentials import Credentials
+            
+            scopes = [
+                "https://www.googleapis.com/auth/youtube.upload",
+                "https://www.googleapis.com/auth/youtube.force-ssl"
+            ]
+            if os.path.exists(self.credentials_path):
+                creds = Credentials.from_authorized_user_file(self.credentials_path, scopes)
+            else:
+                print("[Uploader] Credentials missing for comment posting.")
+                return False
+                
+            youtube = googleapiclient.discovery.build("youtube", "v3", credentials=creds)
+            
+            # 1. Insert comment
+            comment_body = {
+                "snippet": {
+                    "videoId": video_id,
+                    "topLevelComment": {
+                        "snippet": {
+                            "textOriginal": comment_text
+                        }
+                    }
+                }
+            }
+            comment_res = youtube.commentThreads().insert(
+                part="snippet",
+                body=comment_body
+            ).execute()
+            
+            comment_id = comment_res["snippet"]["topLevelComment"]["id"]
+            print(f"[Uploader] Comment posted successfully. ID: {comment_id}")
+            
+            # 2. Pin comment
+            try:
+                youtube.comments().pin(id=comment_id).execute()
+                print(f"[Uploader] Comment pinned successfully!")
+            except Exception as pin_err:
+                print(f"[Uploader] Note: Failed to pin comment: {pin_err}")
+                
+            return True
+        except Exception as e:
+            print(f"[Uploader] Failed to post/pin comment: {e}")
+            return False
 
 if __name__ == "__main__":
     # Self-test code

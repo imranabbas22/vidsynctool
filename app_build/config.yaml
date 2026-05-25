@@ -1,0 +1,117 @@
+# =============================================================================
+# The Daily Audit — Configuration
+# =============================================================================
+# All tunable parameters extracted from video_engine.py and related modules.
+# Change values here to tune behavior without touching code.
+
+# ── General ───────────────────────────────────────────────────────────────────
+general:
+  canvas_width: 1080
+  canvas_height: 1920
+  fps: 30
+  video_seed: null  # null = random per video, set int for deterministic
+
+# ── Subtitles ─────────────────────────────────────────────────────────────────
+subtitles:
+  chars_per_second: 33
+  y_position: 1680
+  max_lines: 2
+  lookahead_ms: 200
+  font_size: 52
+  emphasis_scale_factor: 68
+
+# ── Vignette ──────────────────────────────────────────────────────────────────
+vignette:
+  max_darken: 0.35
+  power_curve: 1.8
+  edge_distance_factor: 1.8
+
+# ── Static (Mascot) ───────────────────────────────────────────────────────────
+static:
+  appearance_chance: 0.75
+  default_size: 70
+  thumbnail_size: 120
+  easter_egg_size: 90
+  position_count: 6
+  expressions:
+    - neutral
+    - shocked
+    - happy
+    - wink
+
+# ── Scan Line ─────────────────────────────────────────────────────────────────
+scan_line:
+  duration: 0.35
+  height: 3
+  pulsing_brightness: true
+
+# ── Card ──────────────────────────────────────────────────────────────────────
+card:
+  label_char_limit: 60
+  shadow_layers: 2
+  shadow_offset: 3
+  border_width: 4
+  redaction_bar_chance: 0.85
+  thumbnail_font_ratio: 0.55
+
+# ── Scene Timing ──────────────────────────────────────────────────────────────
+scene_timing:
+  transition_duration: 0.5
+  burn_transition_duration: 0.8
+  starting_bumper_duration: 2.0
+  ending_bumper_duration: 2.0
+  stamp_animation_duration: 0.15
+  stamp_delay: 0.4
+  heartbeat_frequency_hz: 55
+  power_surge_brightness: 3.0
+  power_surge_scanline_mult: 3.0
+
+# ── Emotion Beats ─────────────────────────────────────────────────────────────
+emotion_beats:
+  scene_1_neutral_weight: 0.15
+  scene_1_shocked_weight: 0.45
+  scene_2_shocked_weight: 0.30
+  scene_2_neutral_weight: 0.70
+  scene_3_wink_weight: 0.10
+  scene_3_happy_weight: 0.40
+  scene_3_beat_duration: 1.5
+
+# ── File Stamp ────────────────────────────────────────────────────────────────
+file_stamp:
+  font_size: 72
+  overshoot_scale: 3.0
+  settle_scale: 1.0
+  border_width: 4
+  corner_radius: 16
+  debunked_color: [200, 40, 40]
+  verified_color: [40, 180, 60]
+  anomalous_color: [200, 160, 40]
+
+# ── Parallax ──────────────────────────────────────────────────────────────────
+parallax:
+  mid_layer_zoom_factor: 0.12
+  deep_layer_zoom_factor: 0.05
+  deep_layer_blur_px: 3
+  mid_layer_alpha: 0.75
+  deep_layer_alpha: 0.25
+  deep_layer_darken: 0.30
+
+# ── Audio ─────────────────────────────────────────────────────────────────────
+audio:
+  volume_reduction_during_fact: 0.4
+  heartbeat_volume: 0.12
+  pulse_sustain_seconds: 0.5
+  theme_music_volume: 0.35
+
+# ── Cache ─────────────────────────────────────────────────────────────────────
+cache:
+  max_audio_cache_gb: 50
+  temp_dir_prefix: "hermes_temp_"
+
+# ── Directories ───────────────────────────────────────────────────────────────
+directories:
+  fonts: "fonts"
+  assets: "assets"
+  database: "database"
+  real_voice: "real_voice"
+  config: "config"
