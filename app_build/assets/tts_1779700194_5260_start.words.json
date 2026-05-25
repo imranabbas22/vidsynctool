@@ -1,0 +1,22 @@
+[
+  {
+    "word": "Another",
+    "offset_ms": 0.0,
+    "duration_ms": 1521.7391304347825
+  },
+  {
+    "word": "lie",
+    "offset_ms": 1521.7391304347825,
+    "duration_ms": 652.1739130434783
+  },
+  {
+    "word": "exposed",
+    "offset_ms": 2173.9130434782605,
+    "duration_ms": 1521.7391304347825
+  },
+  {
+    "word": "today.",
+    "offset_ms": 3695.652173913043,
+    "duration_ms": 1304.3478260869565
+  }
+]

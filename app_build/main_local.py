@@ -396,10 +396,11 @@ def run_pipeline():
                     ssml_raw, hook_clean, context_clean, fact_clean
                 )
                 
-                # Per-scene prosody: urgent hook, measured explanation, heavy reveal
-                s1_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.97'>{s1_ssml}</prosody>"
-                s2_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.88'>{s2_ssml}</prosody>"
-                s3_ssml_wrapped = f"<prosody pitch='-1.5st' rate='0.85'>{s3_ssml}</prosody>"
+                # Per-scene prosody: subtle variation, no voice degradation
+                # All scenes use near-normal rate; the dramatic shift comes from SFX/music
+                s1_ssml_wrapped = f"<prosody pitch='0st' rate='0.97'>{s1_ssml}</prosody>"
+                s2_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{s2_ssml}</prosody>"
+                s3_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.93'>{s3_ssml}</prosody>"
                 
                 print(f"[Local] Myth Scene 1 SSML: {s1_ssml_wrapped}")
                 print(f"[Local] Myth Scene 2 SSML: {s2_ssml_wrapped}")
@@ -422,7 +423,9 @@ def run_pipeline():
                 image_myth_name = f"background_myth_{timestamp}"
                 visual_prompt_myth = script_payload.get("myth_visual_prompt", "Technical blueprint representing the false myth")
                 print(f"[Local] Requesting visual representing the FALSE MYTH: '{visual_prompt_myth}'")
-                image_myth_path = asset_gen.generate_background_image(visual_prompt_myth, image_myth_name, aspect_ratio="9:16", is_blueprint=True, style_suffix=style_suffix)
+                # Append content safety instruction: no politics, no gore, no people, safe for teen+
+                safe_suffix = " No human faces, no political content, no violence, no text, safe for all ages."
+                image_myth_path = asset_gen.generate_background_image(visual_prompt_myth + safe_suffix, image_myth_name, aspect_ratio="9:16", is_blueprint=True, style_suffix=style_suffix)
             except Exception as e:
                 print(f"[Local] ERROR: Myth background image generation failed: {e}")
                 sys.exit(1)
@@ -432,7 +435,8 @@ def run_pipeline():
                 image_truth_name = f"foreground_fact_{timestamp}"
                 visual_prompt_truth = script_payload.get("fact_visual_prompt", "Realistic laboratory or historical archive photography representing the scientific truth")
                 print(f"[Local] Requesting visual representing the TRUTH/REALITY: '{visual_prompt_truth}'")
-                image_truth_path = asset_gen.generate_background_image(visual_prompt_truth, image_truth_name, aspect_ratio="1:1", is_blueprint=False)
+                safe_suffix = " No human faces, no political content, no violence, no text, safe for all ages."
+                image_truth_path = asset_gen.generate_background_image(visual_prompt_truth + safe_suffix, image_truth_name, aspect_ratio="1:1", is_blueprint=False)
             except Exception as e:
                 print(f"[Local] WARNING: Truth foreground image generation failed: {e}. Gracefully falling back to background-only rendering.")
                 image_truth_path = None
@@ -473,7 +477,7 @@ def run_pipeline():
                 if not extra_prompt:
                     extra_prompt = f"Scientific illustration showing {topic}, detailed, realistic, high contrast"
                 extra_imagen_path = asset_gen.generate_background_image(
-                    extra_prompt, extra_img_name,
+                    extra_prompt + " No politics, no violence, no human faces, safe for all ages.", extra_img_name,
                     aspect_ratio="1:1", is_blueprint=False
                 )
                 if extra_imagen_path:
@@ -636,10 +640,11 @@ def run_pipeline():
                     ssml_raw, hook_clean, why_bizarre, closing_statement
                 )
                 
-                # Per-scene prosody: urgent hook, measured explanation, heavy reveal
-                s1_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.97'>{s1_ssml}</prosody>"
-                s2_ssml_wrapped = f"<prosody pitch='-1.0st' rate='0.88'>{s2_ssml}</prosody>"
-                s3_ssml_wrapped = f"<prosody pitch='-1.5st' rate='0.85'>{s3_ssml}</prosody>"
+                # Per-scene prosody: subtle variation, no voice degradation
+                # All scenes use near-normal rate; the dramatic shift comes from SFX/music
+                s1_ssml_wrapped = f"<prosody pitch='0st' rate='0.97'>{s1_ssml}</prosody>"
+                s2_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{s2_ssml}</prosody>"
+                s3_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.93'>{s3_ssml}</prosody>"
                 
                 print(f"[Local] Bizarre Scene 1 SSML: {s1_ssml_wrapped}")
                 print(f"[Local] Bizarre Scene 2 SSML: {s2_ssml_wrapped}")

@@ -2455,7 +2455,7 @@ class VideoEngine:
         return out_path
 
     # New scene-based and flashcard-oriented video compilers
-    def _generate_card(self, image_path: str, label_text: str, status_text: str, is_truth: bool, style_dict: dict, topic: str = "", add_redactions: bool = False) -> Optional[Image.Image]:
+    def _generate_card(self, image_path: str, label_text: str, status_text: str, is_truth: bool, style_dict: dict, topic: str = "", add_redactions: bool = False, card_text: str = "") -> Optional[Image.Image]:
         if not image_path or not os.path.exists(image_path):
             return None
         try:
@@ -2493,7 +2493,7 @@ class VideoEngine:
             header_text_w = draw_card.textlength(label_text.upper(), font=header_font) if hasattr(draw_card, 'textlength') else 300
             draw_card.line([(34, header_underline_y), (34 + int(header_text_w) + 10, header_underline_y)], fill=outline_color + (60,), width=1)
             
-            # Paste body image with rounded corners
+            # ── Fixed image dimensions ──
             img_w, img_h = 762, 550
             inner_img = square_img.resize((img_w, img_h), Image.Resampling.LANCZOS)
             
@@ -2502,34 +2502,88 @@ class VideoEngine:
             draw_mask = ImageDraw.Draw(mask)
             draw_mask.rounded_rectangle([0, 0, img_w, img_h], radius=12, fill=255)
             
-            # Paste using mask
+            # ═══════════════════════════════════════════════════════════════
+            # Card text area — shows extended script content below the image
+            # ───────────────────────────────────────────────────────────────
+            text_area_lines = []
+            text_font_size = 18
+            text_max_w = 730
+            text_line_h = 26
+            text_pad_top = 10   # gap after image border
+            text_pad_bot = 8    # gap before topic separator
+            if card_text:
+                try:
+                    ct_font = ImageFont.truetype(self.font_path, text_font_size)
+                except Exception:
+                    ct_font = ImageFont.load_default()
+                # Wrap card_text into lines
+                raw_words = card_text.split()
+                curr_line_words = []
+                for w in raw_words:
+                    test_line = " ".join(curr_line_words + [w])
+                    tw = draw_card.textlength(test_line, font=ct_font) if hasattr(draw_card, 'textlength') else len(test_line) * text_font_size * 0.6
+                    if tw <= text_max_w:
+                        curr_line_words.append(w)
+                    else:
+                        if curr_line_words:
+                            text_area_lines.append(" ".join(curr_line_words))
+                        curr_line_words = [w]
+                if curr_line_words:
+                    text_area_lines.append(" ".join(curr_line_words))
+                # Cap at 5 lines to prevent excessive card growth
+                if len(text_area_lines) > 5:
+                    text_area_lines = text_area_lines[:4] + ["..."]
+            text_area_h = len(text_area_lines) * text_line_h
+            extra_h = text_area_h + text_pad_top + text_pad_bot
+
+            # Move existing bottom elements down by extra_h
+            topic_sep_y = 648 + extra_h
+            topic_y = 658 + extra_h
+            status_y = 708 + extra_h
+            sep_y = 750 + extra_h
+            footer_y = 770 + extra_h
+
+            # Extend card canvas and redraw card outline / shadow with new height
+            new_canvas_h = 890 + extra_h
+            # Recreate card canvas at new height
+            card_canvas = Image.new("RGBA", (canvas_w, new_canvas_h), (0, 0, 0, 0))
+            draw_card = ImageDraw.Draw(card_canvas)
+
+            # Redraw card background / shadow at new height
+            draw_card.rounded_rectangle([18, 18, 822, new_canvas_h - 18], radius=16, fill=(5, 10, 20, 200))
+            draw_card.rounded_rectangle([22, 22, 818, new_canvas_h - 22], radius=14, fill=(10, 12, 25, 100))
+            draw_card.rounded_rectangle([10, 10, 810, new_canvas_h - 10], radius=16, fill=style_dict["card_bg"] + (255,), outline=outline_color + (255,), width=4)
+            draw_card.rectangle([14, 25, 20, new_canvas_h - 25], fill=outline_color + (255,))
+
+            # Re-render header, image, and image border
+            draw_card.text((34, 30), label_text.upper(), fill=outline_color + (255,), font=header_font)
+            header_text_w = draw_card.textlength(label_text.upper(), font=header_font) if hasattr(draw_card, 'textlength') else 300
+            draw_card.line([(34, header_underline_y), (34 + int(header_text_w) + 10, header_underline_y)], fill=outline_color + (60,), width=1)
             card_canvas.paste(inner_img, (34, 78), mask=mask)
-            
-            # Premium double border around the image
             draw_card.rounded_rectangle([34, 78, 34 + img_w, 78 + img_h], radius=12, outline=outline_color + (50,), width=1)
             draw_card.rounded_rectangle([36, 80, 34 + img_w - 2, 78 + img_h - 2], radius=10, outline=(255, 255, 255, 25), width=1)
-            
+
+            # Render card text lines
+            if text_area_lines and ct_font:
+                text_start_y = 78 + img_h + text_pad_top  # below image
+                for li, line in enumerate(text_area_lines):
+                    ly = text_start_y + li * text_line_h
+                    draw_card.text((34, ly), line, fill=(200, 210, 230, 230), font=ct_font)
+
             # Topic text with separator line above
             try:
                 topic_font = ImageFont.truetype(self.font_path, 32)
                 display_topic = (topic or label_text).upper()
-                # Limit length to fit well
                 if len(display_topic) > 34:
                     display_topic = display_topic[:31] + "..."
-                
-                # Subtle separator line above topic
-                topic_sep_y = 648
                 draw_card.line([(34, topic_sep_y), (796, topic_sep_y)], fill=(255, 255, 255, 25), width=1)
-                
-                draw_card.text((34, 658), display_topic, fill=(255, 255, 255, 240), font=topic_font)
+                draw_card.text((34, topic_y), display_topic, fill=(255, 255, 255, 240), font=topic_font)
             except Exception:
                 pass
-                
+
             # Status dot & label
-            status_y = 708
             is_debunked = ("DEBUNKED" in status_text.upper() or "ANOMALOUS" in status_text.upper())
             dot_color = (255, 60, 60) if is_debunked else (0, 242, 254)
-            # Draw glowing status dot with outer glow ring
             glow_radius = 12
             dot_cx, dot_cy = 40, status_y + 12
             draw_card.ellipse([dot_cx - glow_radius, dot_cy - glow_radius, dot_cx + glow_radius, dot_cy + glow_radius], fill=dot_color + (40,))
@@ -2539,20 +2593,17 @@ class VideoEngine:
                 draw_card.text((56, status_y), status_text.upper(), fill=outline_color + (255,), font=status_font)
             except Exception:
                 pass
-                
+
             # Dashed/Subtle separator
-            sep_y = 750
             for dash_x in range(34, 796, 20):
                 draw_card.line([(dash_x, sep_y), (min(dash_x + 10, 796), sep_y)], fill=(255, 255, 255, 30), width=1)
-            
+
             # Footer metadata with subtle background pill
-            footer_y = 770
             case_num = f"CASE #{abs(hash(topic or label_text)) % 9999:04d}"
             try:
                 footer_font = ImageFont.truetype(self.font_path, 18)
                 footer_text = f"{case_num}  |  THE DAILY AUDIT"
                 fw = int(draw_card.textlength(footer_text, font=footer_font)) if hasattr(draw_card, 'textlength') else 0
-                # Subtle background pill behind footer
                 pill_pad = 12
                 pill_x1 = 34 - 4
                 pill_y1 = footer_y - 4
@@ -2563,6 +2614,10 @@ class VideoEngine:
             except Exception:
                 pass
 
+            # ── Old duplicate block below has been removed ──
+            # Card outline/shadow/header/image/card-text/topic/status/separator/footer
+            # are all rendered in the dynamic-height section above.
+            
             # Redaction bars for Scene 1 — curiosity gap (black bars with [REDACTED] stamps over the image)
             if add_redactions:
                 import hashlib
@@ -2771,9 +2826,9 @@ class VideoEngine:
         if current_line:
             wrapped_line_words.append(current_line)
         
-        # SAFETY: cap at max 2 lines to prevent overflow past frame bottom (1920px)
-        if len(wrapped_line_words) > 2:
-            wrapped_line_words = wrapped_line_words[:2]
+        # SAFETY: cap at max 3 lines to prevent overflow past frame bottom (1920px)
+        if len(wrapped_line_words) > 3:
+            wrapped_line_words = wrapped_line_words[:3]
         
         line_height = 80  # taller to accommodate 68px emphasis font
         y_cursor = y_pos
@@ -3409,7 +3464,7 @@ class VideoEngine:
                     # Word-level kinetic subtitle rendering using real timestamps
                     self._render_kinetic_srt_block(
                         draw_subs, sub_font, active_block["text"],
-                        t_audio_ms, word_boundaries, y_pos=1680, style=style_dict
+                        t_audio_ms, word_boundaries, y_pos=1580, style=style_dict
                     )
                     fused_arr = np.array(fused_img)
 
@@ -3490,7 +3545,7 @@ class VideoEngine:
                     sub_alpha_factor = min(1.0, (sub_progress - 0.80) / 0.08)  # fade in over 8%
                     btn_w, btn_h = 280, 52
                     btn_x = (1080 - btn_w) // 2
-                    btn_y = 1840  # below the 2-line kinetic subtitle area (1674-1830)
+                    btn_y = 1840  # below the 3-line kinetic subtitle area (1580-1820)
                     btn_bg = (255, 60, 60)  # YouTube red
                     btn_text = "SUBSCRIBE"
                     if sub_alpha_factor > 0.05:

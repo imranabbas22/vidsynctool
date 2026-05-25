@@ -7,7 +7,7 @@ import requests
 import urllib.parse
 from PIL import Image
 from io import BytesIO
-from typing import Optional
+from typing import Optional, Tuple
 
 class DataScraper:
     """Handles programmatic scraping of public assets from Wikipedia and Wikimedia Commons."""
@@ -23,6 +23,46 @@ class DataScraper:
         self.headers = {
             "User-Agent": "TheDailyAuditBot/1.0 (contact@thedailyaudit.internal)"
         }
+
+    # Blocklist: Wikipedia page titles/categories to avoid (politics, gore, sensitive topics)
+    CONTENT_BLOCKLIST = [
+        "politic", "election", "president", "party", "democrat", "republican",
+        "war", "battle", "weapon", "military", "conflict", "invasion",
+        "murder", "kill", "death", "violence", "abuse", "torture",
+        "terror", "bomb", "explosion", "massacre", "genocide",
+        "porn", "nude", "sexual", "explicit", "adult",
+        "gun", "shooting", "assault", "attack",
+        "racism", "nazi", "holocaust", "slavery",
+        "drug", "overdose", "suicide", "self-harm",
+    ]
+
+    def _is_content_safe(self, page_title: str) -> Tuple[bool, str]:
+        """Check if a Wikipedia page is safe for a teen+ audience.
+        Returns (is_safe, reason) tuple.
+        Skips pages whose titles contain blocked keywords."""
+        title_lower = page_title.lower()
+        for keyword in self.CONTENT_BLOCKLIST:
+            if keyword in title_lower:
+                return False, f"title contains blocked keyword '{keyword}'"
+        # Also check page categories via API for deeper filtering
+        try:
+            cat_url = (
+                "https://en.wikipedia.org/w/api.php?"
+                "action=query&format=json&prop=categories&"
+                f"titles={urllib.parse.quote(page_title)}&formatversion=2"
+            )
+            r_cat = requests.get(cat_url, headers=self.headers, timeout=8)
+            if r_cat.status_code == 200:
+                pages_data = r_cat.json().get("query", {}).get("pages", [])
+                if pages_data and "categories" in pages_data[0]:
+                    for cat in pages_data[0]["categories"]:
+                        cat_title = cat.get("title", "").lower()
+                        for keyword in self.CONTENT_BLOCKLIST:
+                            if keyword in cat_title:
+                                return False, f"category '{cat_title}' contains blocked keyword '{keyword}'"
+        except Exception:
+            pass  # non-blocking — category check is best-effort
+        return True, ""
 
     def fetch_wikipedia_image(self, query: str, filename_prefix: str) -> Optional[str]:
         """
@@ -52,10 +92,22 @@ class DataScraper:
             if not search_results:
                 print(f"[Scraper] No search results found for: '{clean_query}'")
                 return None
-            
-            # Select the top match
-            best_match_title = search_results[0]["title"]
-            print(f"[Scraper] Best matching page: '{best_match_title}'")
+
+            # Find first search result that passes content safety check
+            best_match_title = None
+            for result in search_results:
+                candidate = result["title"]
+                is_safe, reason = self._is_content_safe(candidate)
+                if is_safe:
+                    best_match_title = candidate
+                    print(f"[Scraper] Best safe matching page: '{best_match_title}'")
+                    break
+                else:
+                    print(f"[Scraper] Skipping '{candidate}' — {reason}")
+
+            if not best_match_title:
+                print(f"[Scraper] All search results for '{clean_query}' blocked by content filter.")
+                return None
 
             # Step 2: Query page info to retrieve its main thumbnail image (800px size)
             image_url_query = (

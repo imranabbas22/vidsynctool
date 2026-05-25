@@ -463,10 +463,22 @@ class AssetGenerator:
                     
                     word_boundaries = []
                     def on_word_boundary(evt):
+                        # Azure SDK v2+ returns timedelta, older versions return ticks (100-ns units)
+                        offset = evt.audio_offset
+                        duration = evt.duration
+                        import datetime
+                        if isinstance(offset, datetime.timedelta):
+                            offset_ms = offset.total_seconds() * 1000.0
+                        else:
+                            offset_ms = offset / 10000.0
+                        if isinstance(duration, datetime.timedelta):
+                            duration_ms = duration.total_seconds() * 1000.0
+                        else:
+                            duration_ms = duration / 10000.0
                         word_boundaries.append({
                             "word": evt.text,
-                            "offset_ms": evt.audio_offset / 10000.0,  # ticks to ms
-                            "duration_ms": evt.duration / 10000.0
+                            "offset_ms": offset_ms,
+                            "duration_ms": duration_ms,
                         })
                     synthesizer.synthesis_word_boundary.connect(on_word_boundary)
 

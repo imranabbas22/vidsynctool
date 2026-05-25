@@ -1,0 +1,217 @@
+[
+  {
+    "word": "You've",
+    "offset_ms": 0.0,
+    "duration_ms": 138.2488479262673
+  },
+  {
+    "word": "probably",
+    "offset_ms": 138.2488479262673,
+    "duration_ms": 184.33179723502306
+  },
+  {
+    "word": "said",
+    "offset_ms": 322.58064516129036,
+    "duration_ms": 92.16589861751153
+  },
+  {
+    "word": "it",
+    "offset_ms": 414.7465437788019,
+    "duration_ms": 46.082949308755765
+  },
+  {
+    "word": "yourself,",
+    "offset_ms": 460.82949308755764,
+    "duration_ms": 207.37327188940094
+  },
+  {
+    "word": "staring",
+    "offset_ms": 668.2027649769586,
+    "duration_ms": 161.29032258064515
+  },
+  {
+    "word": "into",
+    "offset_ms": 829.4930875576038,
+    "duration_ms": 92.16589861751153
+  },
+  {
+    "word": "a",
+    "offset_ms": 921.6589861751153,
+    "duration_ms": 23.041474654377883
+  },
+  {
+    "word": "fishbowl.",
+    "offset_ms": 944.7004608294932,
+    "duration_ms": 207.37327188940094
+  },
+  {
+    "word": "'Goldfish",
+    "offset_ms": 1152.0737327188942,
+    "duration_ms": 207.37327188940094
+  },
+  {
+    "word": "have",
+    "offset_ms": 1359.4470046082952,
+    "duration_ms": 92.16589861751153
+  },
+  {
+    "word": "a",
+    "offset_ms": 1451.6129032258068,
+    "duration_ms": 23.041474654377883
+  },
+  {
+    "word": "three-second",
+    "offset_ms": 1474.6543778801847,
+    "duration_ms": 276.4976958525346
+  },
+  {
+    "word": "memory.'",
+    "offset_ms": 1751.1520737327194,
+    "duration_ms": 184.33179723502306
+  },
+  {
+    "word": "It's",
+    "offset_ms": 1935.4838709677424,
+    "duration_ms": 92.16589861751153
+  },
+  {
+    "word": "the",
+    "offset_ms": 2027.649769585254,
+    "duration_ms": 69.12442396313365
+  },
+  {
+    "word": "perfect",
+    "offset_ms": 2096.7741935483873,
+    "duration_ms": 161.29032258064515
+  },
+  {
+    "word": "excuse",
+    "offset_ms": 2258.0645161290327,
+    "duration_ms": 138.2488479262673
+  },
+  {
+    "word": "for",
+    "offset_ms": 2396.3133640552996,
+    "duration_ms": 69.12442396313365
+  },
+  {
+    "word": "a",
+    "offset_ms": 2465.4377880184334,
+    "duration_ms": 23.041474654377883
+  },
+  {
+    "word": "boring",
+    "offset_ms": 2488.479262672811,
+    "duration_ms": 138.2488479262673
+  },
+  {
+    "word": "tank,",
+    "offset_ms": 2626.7281105990783,
+    "duration_ms": 115.2073732718894
+  },
+  {
+    "word": "right?",
+    "offset_ms": 2741.9354838709673,
+    "duration_ms": 138.2488479262673
+  },
+  {
+    "word": "Makes",
+    "offset_ms": 2880.184331797235,
+    "duration_ms": 115.2073732718894
+  },
+  {
+    "word": "you",
+    "offset_ms": 2995.3917050691243,
+    "duration_ms": 69.12442396313365
+  },
+  {
+    "word": "feel",
+    "offset_ms": 3064.5161290322576,
+    "duration_ms": 92.16589861751153
+  },
+  {
+    "word": "a",
+    "offset_ms": 3156.682027649769,
+    "duration_ms": 23.041474654377883
+  },
+  {
+    "word": "little",
+    "offset_ms": 3179.7235023041467,
+    "duration_ms": 138.2488479262673
+  },
+  {
+    "word": "less",
+    "offset_ms": 3317.972350230414,
+    "duration_ms": 92.16589861751153
+  },
+  {
+    "word": "guilty.Well,",
+    "offset_ms": 3410.1382488479258,
+    "duration_ms": 276.4976958525346
+  },
+  {
+    "word": "I",
+    "offset_ms": 3686.63594470046,
+    "duration_ms": 23.041474654377883
+  },
+  {
+    "word": "hate",
+    "offset_ms": 3709.677419354838,
+    "duration_ms": 92.16589861751153
+  },
+  {
+    "word": "to",
+    "offset_ms": 3801.8433179723497,
+    "duration_ms": 46.082949308755765
+  },
+  {
+    "word": "break",
+    "offset_ms": 3847.9262672811055,
+    "duration_ms": 115.2073732718894
+  },
+  {
+    "word": "it",
+    "offset_ms": 3963.1336405529946,
+    "duration_ms": 46.082949308755765
+  },
+  {
+    "word": "to",
+    "offset_ms": 4009.21658986175,
+    "duration_ms": 46.082949308755765
+  },
+  {
+    "word": "you,",
+    "offset_ms": 4055.2995391705053,
+    "duration_ms": 92.16589861751153
+  },
+  {
+    "word": "but",
+    "offset_ms": 4147.465437788017,
+    "duration_ms": 69.12442396313365
+  },
+  {
+    "word": "scientists",
+    "offset_ms": 4216.58986175115,
+    "duration_ms": 230.4147465437788
+  },
+  {
+    "word": "have",
+    "offset_ms": 4447.004608294928,
+    "duration_ms": 92.16589861751153
+  },
+  {
+    "word": "actually",
+    "offset_ms": 4539.17050691244,
+    "duration_ms": 184.33179723502306
+  },
+  {
+    "word": "trained",
+    "offset_ms": 4723.502304147463,
+    "duration_ms": 161.29032258064515
+  },
+  {
+    "word": "them.",
+    "offset_ms": 4884.792626728108,
+    "duration_ms": 115.2073732718894
+  }
+]

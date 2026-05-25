@@ -40,17 +40,16 @@ class YouTubeUploader:
             from google_auth_oauthlib.flow import InstalledAppFlow
             from google.auth.transport.requests import Request
 
-            # Define the minimum upload and comment moderation scopes
-            scopes = [
-                "https://www.googleapis.com/auth/youtube.upload",
-                "https://www.googleapis.com/auth/youtube.force-ssl"
-            ]
+            # Use only youtube.upload scope — youtube.force-ssl is requested separately
+            # when posting comments so that token refresh works with cached credentials
+            upload_scopes = ["https://www.googleapis.com/auth/youtube.upload"]
+            comment_scopes = upload_scopes + ["https://www.googleapis.com/auth/youtube.force-ssl"]
             creds = None
 
             # 1. Load cached credentials if they exist
             if os.path.exists(self.credentials_path):
                 print("[Uploader] Loading cached YouTube credentials from token file...")
-                creds = Credentials.from_authorized_user_file(self.credentials_path, scopes)
+                creds = Credentials.from_authorized_user_file(self.credentials_path, upload_scopes)
 
             # 2. Refresh or trigger initial browser authentication flow
             if not creds or not creds.valid:
@@ -64,7 +63,7 @@ class YouTubeUploader:
                 
                 if not creds:
                     print("[Uploader] Initiating initial YouTube OAuth browser authentication...")
-                    flow = InstalledAppFlow.from_client_secrets_file(self.client_secrets_path, scopes)
+                    flow = InstalledAppFlow.from_client_secrets_file(self.client_secrets_path, upload_scopes)
                     creds = flow.run_local_server(port=0, prompt="consent")
                 
                 # Save credentials for future headless daily scheduled runs

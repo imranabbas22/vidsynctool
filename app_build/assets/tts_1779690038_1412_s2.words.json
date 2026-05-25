@@ -1,0 +1,102 @@
+[
+  {
+    "word": "You",
+    "offset_ms": 0.0,
+    "duration_ms": 224.25531914893617
+  },
+  {
+    "word": "didn't",
+    "offset_ms": 224.25531914893617,
+    "duration_ms": 368.51063829787233
+  },
+  {
+    "word": "change",
+    "offset_ms": 592.7659574468084,
+    "duration_ms": 368.51063829787233
+  },
+  {
+    "word": "the",
+    "offset_ms": 961.2765957446808,
+    "duration_ms": 224.25531914893617
+  },
+  {
+    "word": "hair.",
+    "offset_ms": 1185.5319148936169,
+    "duration_ms": 320.4255319148936
+  },
+  {
+    "word": "You",
+    "offset_ms": 1505.9574468085104,
+    "duration_ms": 224.25531914893617
+  },
+  {
+    "word": "just",
+    "offset_ms": 1730.2127659574467,
+    "duration_ms": 272.3404255319149
+  },
+  {
+    "word": "gave",
+    "offset_ms": 2002.5531914893616,
+    "duration_ms": 272.3404255319149
+  },
+  {
+    "word": "it",
+    "offset_ms": 2274.8936170212764,
+    "duration_ms": 176.17021276595744
+  },
+  {
+    "word": "a",
+    "offset_ms": 2451.0638297872338,
+    "duration_ms": 128.08510638297872
+  },
+  {
+    "word": "bad",
+    "offset_ms": 2579.1489361702124,
+    "duration_ms": 224.25531914893617
+  },
+  {
+    "word": "haircut.",
+    "offset_ms": 2803.4042553191484,
+    "duration_ms": 464.6808510638298
+  },
+  {
+    "word": "The",
+    "offset_ms": 3268.085106382978,
+    "duration_ms": 224.25531914893617
+  },
+  {
+    "word": "follicle",
+    "offset_ms": 3492.340425531914,
+    "duration_ms": 464.6808510638298
+  },
+  {
+    "word": "underneath",
+    "offset_ms": 3957.021276595744,
+    "duration_ms": 560.8510638297872
+  },
+  {
+    "word": "doesn't",
+    "offset_ms": 4517.872340425532,
+    "duration_ms": 416.59574468085106
+  },
+  {
+    "word": "even",
+    "offset_ms": 4934.468085106382,
+    "duration_ms": 272.3404255319149
+  },
+  {
+    "word": "know",
+    "offset_ms": 5206.808510638297,
+    "duration_ms": 272.3404255319149
+  },
+  {
+    "word": "you",
+    "offset_ms": 5479.1489361702115,
+    "duration_ms": 224.25531914893617
+  },
+  {
+    "word": "shaved.",
+    "offset_ms": 5703.4042553191475,
+    "duration_ms": 416.59574468085106
+  }
+]
