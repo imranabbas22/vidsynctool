@@ -14,7 +14,7 @@ class FacebookUploader:
 
     def upload_reel(self, video_path: str, description: str) -> Tuple[bool, Optional[str]]:
         """
-        Uploads a video to Facebook Reels under the configured Page.
+        Uploads a video to Facebook Reels under the configured Page as a draft.
         Uses a 3-step upload process: Start session, upload binary data, finish session.
         """
         if not self.page_id or not self.access_token:
@@ -70,7 +70,7 @@ class FacebookUploader:
             publish_payload = {
                 "upload_phase": "finish",
                 "video_id": video_id,
-                "video_state": "PUBLISHED",
+                "video_state": "DRAFT",  # Upload as draft — review before publishing
                 "description": description,
                 "access_token": self.access_token
             }

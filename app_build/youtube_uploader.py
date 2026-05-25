@@ -15,9 +15,11 @@ class YouTubeUploader:
         self.client_secrets_path = os.path.join(self.config_dir, "client_secrets.json")
         self.credentials_path = os.path.join(self.config_dir, "credentials.json")
 
-    def upload_short(self, video_path: str, title: str, description: str, tags: List[str]) -> Tuple[bool, Optional[str]]:
+    def upload_short(self, video_path: str, title: str, description: str, tags: List[str], thumbnail_path: Optional[str] = None) -> Tuple[bool, Optional[str]]:
         """
-        Uploads a vertical video to YouTube as a public Short.
+        Uploads a vertical video to YouTube as a private Short (draft).
+        You can review and publish it manually from YouTube Studio.
+        Optionally uploads a custom thumbnail.
         Caches authorized OAuth tokens locally for headless runs.
         """
         # Ensure #Shorts is present in the title
@@ -83,7 +85,7 @@ class YouTubeUploader:
                     "categoryId": "27"  # Education category
                 },
                 "status": {
-                    "privacyStatus": "public",  # Sets short to public
+                    "privacyStatus": "private",  # Private draft — review in YouTube Studio before publishing
                     "selfDeclaredMadeForKids": False
                 }
             }
@@ -112,7 +114,21 @@ class YouTubeUploader:
 
             video_id = response.get("id")
             print(f"[Uploader] Upload successful! YouTube Video ID: {video_id}")
-            print(f"[Uploader] Watch URL: https://youtu.be/{video_id}")
+            print(f"[Uploader] Watch URL (private): https://youtu.be/{video_id}")
+            print(f"[Uploader] Review in YouTube Studio before publishing: https://studio.youtube.com/video/{video_id}/edit")
+
+            # Upload custom thumbnail if provided
+            if thumbnail_path and os.path.exists(thumbnail_path):
+                try:
+                    from googleapiclient.http import MediaFileUpload as ThumbMediaUpload
+                    youtube.thumbnails().set(
+                        videoId=video_id,
+                        media_body=ThumbMediaUpload(thumbnail_path)
+                    ).execute()
+                    print(f"[Uploader] Custom thumbnail uploaded: {thumbnail_path}")
+                except Exception as thumb_err:
+                    print(f"[Uploader] Thumbnail upload failed (non-fatal): {thumb_err}")
+
             return True, video_id
 
         except Exception as e:

@@ -992,7 +992,8 @@ def run_pipeline():
             print(f"[Main] Connecting to YouTube Data API for Short deployment with tags: {tags}")
             @retry_with_backoff(max_retries=3, base_delay=2.0)
             def _yt_upload():
-                return uploader.upload_short(video_path, title, yt_desc, tags)
+                thumb_path = os.path.splitext(video_path)[0] + "_thumb.png"
+                return uploader.upload_short(video_path, title, yt_desc, tags, thumbnail_path=thumb_path)
             yt_upload_success, yt_video_id = _yt_upload()
             if yt_upload_success and yt_video_id:
                 comment_hook = script_payload.get("comment_hook", "")
