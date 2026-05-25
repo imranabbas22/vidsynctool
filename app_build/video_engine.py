@@ -795,6 +795,43 @@ class VideoEngine:
         # 2. Setup Word timing calculations
         words_timing = self._calculate_word_timings(script_payload, duration)
 
+        # Try to synchronize words_timing with real timestamps from .words.json if available
+        words_json_path = os.path.splitext(audio_path)[0] + ".words.json"
+        if os.path.exists(words_json_path):
+            try:
+                import json
+                with open(words_json_path, "r", encoding="utf-8") as wf:
+                    word_boundaries = json.load(wf)
+                
+                # Align words_timing (calculated) with word_boundaries (real)
+                if len(words_timing) == len(word_boundaries):
+                    for w_idx, wb in enumerate(word_boundaries):
+                        words_timing[w_idx]["start_time"] = wb["offset_ms"] / 1000.0
+                        words_timing[w_idx]["end_time"] = (wb["offset_ms"] + wb["duration_ms"]) / 1000.0
+                    print(f"[VideoEngine] Successfully synchronized words_timing with {words_json_path}")
+                else:
+                    print(f"[VideoEngine] Timing word count ({len(words_timing)}) does not match real word count ({len(word_boundaries)}). Aligning words dynamically...")
+                    wb_idx = 0
+                    for wt in words_timing:
+                        wt_clean = re.sub(r'[^\w]', '', wt["word"]).lower()
+                        found = False
+                        for j in range(wb_idx, min(wb_idx + 5, len(word_boundaries))):
+                            wb_clean = re.sub(r'[^\w]', '', word_boundaries[j]["word"]).lower()
+                            if wt_clean == wb_clean:
+                                wb = word_boundaries[j]
+                                wt["start_time"] = wb["offset_ms"] / 1000.0
+                                wt["end_time"] = (wb["offset_ms"] + wb["duration_ms"]) / 1000.0
+                                wb_idx = j + 1
+                                found = True
+                                break
+                        if not found and wb_idx < len(word_boundaries):
+                            wb = word_boundaries[wb_idx]
+                            wt["start_time"] = wb["offset_ms"] / 1000.0
+                            wt["end_time"] = (wb["offset_ms"] + wb["duration_ms"]) / 1000.0
+                            wb_idx += 1
+            except Exception as e:
+                print(f"[VideoEngine] WARNING: Failed to sync words_timing with real timestamps: {e}")
+
         # Find transition time of when the "Fact" begins (phrase_idx == 2 represents the fact)
         fact_start_time = 0.0
         for w in words_timing:
@@ -2220,8 +2257,8 @@ class VideoEngine:
         # Space width
         space_width = draw.textlength(" ", font=font)
         
-        # Build lines of words that fit within max width (900px)
-        max_width = 900
+        # Build lines of words that fit within max width (800px)
+        max_width = 800
         lines = []
         current_line = []
         current_width = 0.0
@@ -2748,7 +2785,7 @@ class VideoEngine:
     def _render_kinetic_srt_block(self, draw: ImageDraw.Draw, font: ImageFont.FreeTypeFont,
                                   block_text: str, t_audio_ms: float,
                                   word_boundaries: list, y_pos: int = 1540,
-                                  style: dict = None):
+                                  style: dict = None, block_start_ms: Optional[float] = None):
         """
         Renders an SRT subtitle block with word-level kinetic highlighting.
         Uses real word-level timestamps (from .words.json) to highlight the
@@ -2766,20 +2803,37 @@ class VideoEngine:
         # Find which word in the block is currently spoken, based on word boundary timestamps
         active_word_index_in_block = -1
         if word_boundaries:
+            active_word_idx_global = -1
             for idx, wb in enumerate(word_boundaries):
                 wb_start = wb["offset_ms"]
                 wb_end = wb["offset_ms"] + wb["duration_ms"]
                 if wb_start <= t_audio_ms < wb_end:
-                    active_word_index_in_block = idx
+                    active_word_idx_global = idx
                     break
+            
+            if active_word_idx_global != -1:
+                if block_start_ms is not None:
+                    block_start_global_idx = -1
+                    min_diff = 999999.0
+                    for idx, wb in enumerate(word_boundaries):
+                        diff = abs(wb["offset_ms"] - block_start_ms)
+                        if diff < min_diff:
+                            min_diff = diff
+                            block_start_global_idx = idx
+                    if block_start_global_idx != -1:
+                        active_word_index_in_block = active_word_idx_global - block_start_global_idx
+                else:
+                    # Fallback text alignment
+                    active_word_str = word_boundaries[active_word_idx_global]["word"]
+                    active_word_clean = re.sub(r'[^\w]', '', active_word_str).lower()
+                    for w_idx, word in enumerate(block_words):
+                        word_clean = re.sub(r'[^\w]', '', word).lower()
+                        if word_clean == active_word_clean:
+                            active_word_index_in_block = w_idx
+                            break
         
-        # Map word boundary indices to words in this block
-        # word_boundaries is a subset of the full scene word list for JUST this block
-        # Since we don't know which words from the full list are in this block,
-        # we'll align by matching each word position within the block text
-        
-        # Wrap words to fit within max width (960px)
-        max_width = 960
+        # Wrap words to fit within max width (800px)
+        max_width = 800
         wrapped_line_words = []  # list of lists, each sublist is (word_text, is_active, is_emphasis_pos)
         current_line = []
         current_width = 0.0
@@ -3464,7 +3518,8 @@ class VideoEngine:
                     # Word-level kinetic subtitle rendering using real timestamps
                     self._render_kinetic_srt_block(
                         draw_subs, sub_font, active_block["text"],
-                        t_audio_ms, word_boundaries, y_pos=1580, style=style_dict
+                        t_audio_ms, word_boundaries, y_pos=1580, style=style_dict,
+                        block_start_ms=active_block["start_ms"]
                     )
                     fused_arr = np.array(fused_img)
 

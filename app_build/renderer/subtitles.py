@@ -238,6 +238,7 @@ def render_kinetic_srt_block(
     word_boundaries: list,
     y_pos: int = Y_POS_DEFAULT,
     style: dict = None,
+    block_start_ms: float = None,
 ):
     """
     Render an SRT subtitle block with word-level kinetic highlighting.
@@ -259,12 +260,34 @@ def render_kinetic_srt_block(
     # ── Determine which word in the block is currently spoken ──────────
     active_word_index_in_block = -1
     if word_boundaries:
+        active_word_idx_global = -1
         for idx, wb in enumerate(word_boundaries):
             wb_start = wb["offset_ms"]
             wb_end = wb["offset_ms"] + wb["duration_ms"]
             if wb_start <= t_audio_ms < wb_end:
-                active_word_index_in_block = idx
+                active_word_idx_global = idx
                 break
+        
+        if active_word_idx_global != -1:
+            if block_start_ms is not None:
+                block_start_global_idx = -1
+                min_diff = 999999.0
+                for idx, wb in enumerate(word_boundaries):
+                    diff = abs(wb["offset_ms"] - block_start_ms)
+                    if diff < min_diff:
+                        min_diff = diff
+                        block_start_global_idx = idx
+                if block_start_global_idx != -1:
+                    active_word_index_in_block = active_word_idx_global - block_start_global_idx
+            else:
+                # Fallback text alignment
+                active_word_str = word_boundaries[active_word_idx_global]["word"]
+                active_word_clean = re.sub(r'[^\w]', '', active_word_str).lower()
+                for w_idx, word in enumerate(block_words):
+                    word_clean = re.sub(r'[^\w]', '', word).lower()
+                    if word_clean == active_word_clean:
+                        active_word_index_in_block = w_idx
+                        break
 
     # ── Emphasis word indices ──────────────────────────────────────────
     emphasis_indices = set()
@@ -274,7 +297,7 @@ def render_kinetic_srt_block(
         emphasis_indices.add(len(block_words) - 1)
 
     # ── Word-wrap with per-word metadata ───────────────────────────────
-    max_width = 960
+    max_width = 800
     wrapped_line_words = []  # list of lists: (word, is_active, is_emphasis, use_font, w_width)
     current_line = []
     current_width = 0.0
@@ -418,8 +441,8 @@ def render_highlighted_subtitles(
 
     space_width = draw.textlength(" ", font=font)
 
-    # ── Build wrapped lines (max 900 px) ───────────────────────────────
-    max_width = 900
+    # ── Build wrapped lines (max 800 px) ───────────────────────────────
+    max_width = 800
     lines = []
     current_line = []
     current_width = 0.0

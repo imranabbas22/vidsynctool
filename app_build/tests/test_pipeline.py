@@ -93,11 +93,11 @@ def test_topic_verification_check(tmp_path):
             
     # Mocking passing validation
     valid_client = MockClient("VALID|Great topic about quantum biology")
-    assert ingestion._verify_topic_robustness("Quantum compass", "Physics", "Robins use entanglement to navigate", valid_client)
+    assert ingestion._verify_topic_robustness("Quantum compass", "Physics", "Robins use entanglement to navigate", valid_client, [])
     
     # Mocking failing validation
     invalid_client = MockClient("INVALID|Too commonly known and boring")
-    assert not ingestion._verify_topic_robustness("Glass flows", "Physics", "Glass is actually not a liquid", invalid_client)
+    assert not ingestion._verify_topic_robustness("Glass flows", "Physics", "Glass is actually not a liquid", invalid_client, [])
     
     # Mocking API error (should fallback to True gracefully to prevent blocking)
     class ErrorModels:
@@ -107,7 +107,7 @@ def test_topic_verification_check(tmp_path):
     class ErrorClient:
         models = ErrorModels()
         
-    assert ingestion._verify_topic_robustness("Unsure topic", "Chemistry", "Obscure reaction", ErrorClient())
+    assert ingestion._verify_topic_robustness("Unsure topic", "Chemistry", "Obscure reaction", ErrorClient(), [])
 
 def test_bootstrap_exhaustion(tmp_path):
     """Verifies topic selection and returns unique topics until pool is exhausted."""
@@ -128,7 +128,7 @@ def test_bootstrap_exhaustion(tmp_path):
     import pytest
     with pytest.raises(RuntimeError) as exc_info:
         ingestion.fetch_unused_misconception(gemini_client=None)
-    assert "bootstrap myths are exhausted" in str(exc_info.value)
+    assert "Predefined bootstrap myths exhausted" in str(exc_info.value)
 
 # -----------------------------------------------------------------------------
 # 2. LLM Orchestrator Utility Tests
