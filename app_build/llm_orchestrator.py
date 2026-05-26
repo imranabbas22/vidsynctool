@@ -187,7 +187,7 @@ class SmartGeminiClient:
             except Exception as e:
                 err_str = str(e).lower()
                 is_rate_limit = "429" in err_str or "resource exhausted" in err_str or "resource_exhausted" in err_str
-                is_server_error = "503" in err_str or "unavailable" in err_str or "high demand" in err_str or "500" in err_str
+                is_server_error = "503" in err_str or "504" in err_str or "unavailable" in err_str or "high demand" in err_str or "500" in err_str or "deadline_exceeded" in err_str
                 
                 if is_rate_limit or is_server_error:
                     if not self.use_paid and self.paid_key:
@@ -873,7 +873,7 @@ TONE: Genuinely fascinated. You're not smug — you're sharing wonder at how wei
                 result = response.text.strip().lower()
             else:
                 from google.genai import types
-                response = self.client.client.models.generate_content(
+                response = self.client.models.generate_content(
                     model='gemini-2.5-flash',
                     contents=prompt,
                     config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=20)
@@ -1011,7 +1011,7 @@ TONE: Genuinely fascinated. You're not smug — you're sharing wonder at how wei
                 f"OUTPUT SCHEMA (strict JSON):\n{DailyAuditScriptPayload.schema_json()}\n\n"
                 f"{user_prompt}"
             )
-            response = self.client.client.models.generate_content(
+            response = self.client.models.generate_content(
                 model='gemini-2.5-pro',
                 contents=full_prompt,
                 config=types.GenerateContentConfig(
@@ -1047,10 +1047,23 @@ TONE: Genuinely fascinated. You're not smug — you're sharing wonder at how wei
     # ═══════════════════════════════════════════════════════════════════════
 
     @staticmethod
-    def calculate_word_count(payload: Dict[str, Any]) -> int:
+    def calculate_word_count(payload) -> int:
         """Calculates the total spoken word count of the script (3 content scenes only)."""
         import re
-        script_text = f"{payload.get('hook', '')} {payload.get('context', '')} {payload.get('fact', '')}"
+        # Handle both Pydantic models (DailyAuditScriptPayload) and legacy dicts
+        if hasattr(payload, 'beat1_hook'):
+            hook = payload.beat1_hook or ''
+            context = getattr(payload, 'beat2_pivot', '') or ''
+            fact = getattr(payload, 'beat3_mechanism', '') or ''
+        elif hasattr(payload, 'hook'):
+            hook = payload.hook or ''
+            context = getattr(payload, 'context', '') or ''
+            fact = getattr(payload, 'reveal', getattr(payload, 'fact', '')) or ''
+        else:
+            hook = payload.get('hook', payload.get('beat1_hook', ''))
+            context = payload.get('context', payload.get('beat2_pivot', ''))
+            fact = payload.get('reveal', payload.get('fact', payload.get('beat3_mechanism', '')))
+        script_text = f"{hook} {context} {fact}"
         # Clean both XML and bracket emotion cues before counting words
         script_text = re.sub(r'<[^>]+>', '', script_text)
         script_text = re.sub(r'\[[\w\s_/-]+\]', '', script_text)

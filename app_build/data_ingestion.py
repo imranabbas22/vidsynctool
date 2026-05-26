@@ -240,6 +240,28 @@ class DataIngestion:
         if bootstrap:
             return bootstrap
 
+        # Fallback: check DB for previously-generated but unused topics
+        print("[Ingestion] Bootstrap myths exhausted. Checking DB for unused topics...")
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT topic, content_type, script_hook FROM audit_history "
+                "WHERE published_to_yt = 0 AND (content_type = 'myth' OR content_type IS NULL) AND topic IS NOT NULL "
+                "ORDER BY RANDOM() LIMIT 20"
+            )
+            db_candidates = cursor.fetchall()
+        
+        for db_topic, db_cat, db_desc in db_candidates:
+            # Simple check: skip if this exact topic has been published
+            cursor.execute("SELECT published_to_yt FROM audit_history WHERE topic = ?", (db_topic,))
+            result = cursor.fetchone()
+            if result and result[0] == 1:
+                continue
+            print(f"[Ingestion] Using DB topic: {db_topic[:60]}")
+            return (db_topic, db_cat if db_cat else "General", db_desc or "")
+        
+        print("[Ingestion] No unused DB topics found. Falling back to Gemini generation...")
+
         if gemini_client is None:
             raise RuntimeError(
                 "[Ingestion] Predefined bootstrap myths exhausted, but no Gemini Client provided."

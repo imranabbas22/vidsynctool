@@ -341,6 +341,8 @@ def run_pipeline():
             try:
                 print("[Local] Calling Gemini to construct structured 5-beat script...")
                 script_payload = orchestrator.generate_structured_script(topic, category, description)
+                # Convert Pydantic model to dict for item assignment compatibility
+                script_payload = script_payload.model_dump()
                 episode_num = ingestion.get_next_episode()
                 script_payload["episode_num"] = episode_num
                 word_count = LLMOrchestrator.calculate_word_count(script_payload)
@@ -374,12 +376,12 @@ def run_pipeline():
                     "Another lie exposed today.",
                     "Declassified. Watch carefully.",
                 ])
-                starting_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{starting_text}</prosody>"
+                starting_ssml_wrapped = f"<prosody pitch='+0st' rate='0.95'>{starting_text}</prosody>"
                 print(f"[Local] Myth Starting Bumper: '{starting_text}'")
 
                 # --- Ending bumper TTS ---
                 ending_text = f"{cta_text} CLASS DISMISSED."
-                ending_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{ending_text}</prosody>"
+                ending_ssml_wrapped = f"<prosody pitch='+0st' rate='0.95'>{ending_text}</prosody>"
                 print(f"[Local] Myth Ending Bumper: '{ending_text}'")
 
                 # Determine raw ssml script
@@ -401,8 +403,8 @@ def run_pipeline():
                 
                 # Per-scene prosody: subtle variation, no voice degradation
                 # All scenes use near-normal rate; the dramatic shift comes from SFX/music
-                s1_ssml_wrapped = f"<prosody pitch='0st' rate='0.97'>{s1_ssml}</prosody>"
-                s2_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{s2_ssml}</prosody>"
+                s1_ssml_wrapped = f"<prosody pitch='+0st' rate='0.97'>{s1_ssml}</prosody>"
+                s2_ssml_wrapped = f"<prosody pitch='+0st' rate='0.95'>{s2_ssml}</prosody>"
                 s3_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.93'>{s3_ssml}</prosody>"
                 
                 print(f"[Local] Myth Scene 1 SSML: {s1_ssml_wrapped}")
@@ -656,12 +658,12 @@ def run_pipeline():
                     "Something bizarre just surfaced.",
                     "Declassified. Watch carefully.",
                 ])
-                starting_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{starting_text}</prosody>"
+                starting_ssml_wrapped = f"<prosody pitch='+0st' rate='0.95'>{starting_text}</prosody>"
                 print(f"[Local] Bizarre Starting Bumper: '{starting_text}'")
 
                 # --- Ending bumper TTS ---
                 ending_text = f"{cta_text} CLASS DISMISSED."
-                ending_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{ending_text}</prosody>"
+                ending_ssml_wrapped = f"<prosody pitch='+0st' rate='0.95'>{ending_text}</prosody>"
                 print(f"[Local] Bizarre Ending Bumper: '{ending_text}'")
 
                 # Determine raw ssml script
@@ -683,8 +685,8 @@ def run_pipeline():
                 
                 # Per-scene prosody: subtle variation, no voice degradation
                 # All scenes use near-normal rate; the dramatic shift comes from SFX/music
-                s1_ssml_wrapped = f"<prosody pitch='0st' rate='0.97'>{s1_ssml}</prosody>"
-                s2_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{s2_ssml}</prosody>"
+                s1_ssml_wrapped = f"<prosody pitch='+0st' rate='0.97'>{s1_ssml}</prosody>"
+                s2_ssml_wrapped = f"<prosody pitch='+0st' rate='0.95'>{s2_ssml}</prosody>"
                 s3_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.93'>{s3_ssml}</prosody>"
                 
                 print(f"[Local] Bizarre Scene 1 SSML: {s1_ssml_wrapped}")

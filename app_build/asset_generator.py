@@ -133,142 +133,6 @@ class AssetGenerator:
 
     # ── End Sprint A ─────────────────────────────────────────────────────
 
-    def _generate_edge_tts(self, text: str, output_path: str) -> str:
-        """Generate TTS audio using Edge-TTS (Microsoft free TTS — no API key needed).
-        Falls back to Azure or offline mockup if edge-tts is unavailable.
-        Returns the output path on success, raises on failure.
-        """
-        import edge_tts
-        import json
-        import subprocess
-
-        # Strip SSML tags and bracket cues — edge-tts speaks plain text
-        clean_text = text
-        clean_text = re.sub(r'<[^>]*>', '', clean_text)
-        clean_text = re.sub(r'\[[\w\s_/-]+\]', '', clean_text).strip()
-        # Fix missing spaces after punctuation (prevents "word.Word" being spoken as letters)
-        clean_text = re.sub(r'([.!?])([A-Za-z])', r'\1 \2', clean_text)
-
-        # Map Azure voice name to edge-tts equivalent (same Microsoft voices work)
-        voice = self.voice_name or "en-US-AndrewMultilingualNeural"
-
-        # Use save_sync() — synchronous wrapper around edge-tts
-        if not clean_text.strip():
-            # Empty text — generate short silent placeholder
-            return self._generate_silent_placeholder(output_path, duration_ms=2000)
-
-        communicate = edge_tts.Communicate(clean_text, voice=voice)
-        communicate.save_sync(output_path)
-
-        # Verify file is valid
-        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            raise RuntimeError("Edge TTS produced empty output")
-
-        # Get actual audio duration via ffprobe (most accurate)
-        ffprobe_exe = "ffprobe"  # system PATH fallback
-        try:
-            import imageio_ffmpeg
-            ffmpeg_dir = os.path.dirname(imageio_ffmpeg.get_ffmpeg_exe())
-            ffprobe_candidate = os.path.join(ffmpeg_dir, "ffprobe.exe" if os.name == 'nt' else "ffprobe")
-            if os.path.exists(ffprobe_candidate):
-                ffprobe_exe = ffprobe_candidate
-        except (ImportError, Exception):
-            pass
-
-        total_duration_ms = 3000.0  # fallback
-        try:
-            startupinfo = None
-            if os.name == 'nt':
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            probe = subprocess.run(
-                [ffprobe_exe, "-v", "quiet", "-print_format", "json",
-                 "-show_entries", "format=duration", output_path],
-                capture_output=True, text=True, timeout=10, startupinfo=startupinfo
-            )
-            if probe.returncode == 0:
-                data = json.loads(probe.stdout)
-                duration_sec = float(data["format"]["duration"])
-                total_duration_ms = duration_sec * 1000.0
-        except Exception:
-            pass
-
-        print(f"[AssetGen] Edge TTS audio generated: {output_path} ({total_duration_ms:.0f}ms)")
-
-        # Estimate word boundaries from total duration using base word time + character proportion
-        # Base word time prevents tiny words ("a", "the") from flashing too fast
-        words = clean_text.split()
-        word_boundaries = []
-        if words:
-            base_word_ms = 80
-            num_words = len(words)
-            base_total = num_words * base_word_ms
-            total_chars = sum(len(w) for w in words)
-            remaining = total_duration_ms - base_total
-            if remaining < 0:
-                remaining = total_duration_ms
-                base_total = 0
-            current_ms = 0.0
-            for w in words:
-                char_portion = len(w) / total_chars if total_chars > 0 else 0
-                duration_ms = base_word_ms + remaining * char_portion
-                word_boundaries.append({
-                    "word": w,
-                    "offset_ms": current_ms,
-                    "duration_ms": max(duration_ms, 50)
-                })
-                current_ms += duration_ms
-
-        self._write_srt_from_word_boundaries(word_boundaries, output_path)
-        return output_path
-
-    def _generate_silent_placeholder(self, output_path: str, duration_ms: int = 2000) -> str:
-        """Generate a valid silent MP3 placeholder file of the given duration.
-        Uses ffmpeg anullsrc filter, with base64 fallback."""
-        import subprocess
-        try:
-            import imageio_ffmpeg
-            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-        except ImportError:
-            ffmpeg_exe = "ffmpeg"
-        duration_sec = max(1, duration_ms / 1000.0)
-        try:
-            cmd = [
-                ffmpeg_exe, "-y",
-                "-f", "lavfi",
-                "-i", "anullsrc=r=44100:cl=mono",
-                "-t", str(duration_sec),
-                "-acodec", "libmp3lame",
-                output_path
-            ]
-            startupinfo = None
-            if os.name == 'nt':
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            subprocess.run(
-                cmd, check=True, startupinfo=startupinfo,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-            print(f"[AssetGen] Silent placeholder MP3 ({duration_sec}s) generated: {output_path}")
-        except Exception as ffmpeg_err:
-            print(f"[AssetGen] FFmpeg silent generation failed ({ffmpeg_err}). Writing tiny fallback MP3...")
-            import base64
-            silent_mp3_b64 = (
-                "SUQzBAAAAAAAAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAbXA0MgBUWFhYAAAAEgAAA21pbm9yX3ZlcnNpb24AM"
-                "QBUWFhYAAAAHAAAA2NvbXBhdGlibGVfYnJhbmRzAG1wNDJpc29tAFRFTgAAAA4AAAMAd2RDcmVhdG9yAFAA//"
-                "MUxAAAAAAAAAAAAAAAIEAElgQD5nAPgAADA8A/gQD5gAD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-            )
-            missing_padding = len(silent_mp3_b64) % 4
-            if missing_padding:
-                silent_mp3_b64 += "=" * (4 - missing_padding)
-            with open(output_path, "wb") as f:
-                f.write(base64.b64decode(silent_mp3_b64))
-            print(f"[AssetGen] Fallback tiny silent placeholder MP3 written: {output_path}")
-        # Generate empty SRT
-        self._write_srt_from_word_boundaries([], output_path)
-        return output_path
 
     def _process_brackets_to_ssml(self, text: str) -> str:
         """
@@ -332,81 +196,31 @@ class AssetGenerator:
         except Exception as e:
             print(f"[AssetGen] WARNING: Failed to generate subtitle SRT: {e}")
 
-    def _estimate_word_boundaries(self, text: str, audio_path: str) -> list:
-        duration = 5.0
-        try:
-            from moviepy.editor import AudioFileClip
-            clip = AudioFileClip(audio_path)
-            duration = clip.duration
-            clip.close()
-        except Exception:
-            pass
-            
-        import re
-        clean_text = re.sub(r'<[^>]*>', '', text)
-        clean_text = re.sub(r'\[[\w\s_/-]+\]', '', clean_text).strip()
-        words = clean_text.split()
-        if not words:
-            return []
-            
-        total_chars = sum(len(w) for w in words)
-        sec_per_char = duration / total_chars if total_chars > 0 else 0.1
-        
-        word_boundaries = []
-        current_time = 0.0
-        for w in words:
-            word_dur = len(w) * sec_per_char
-            word_boundaries.append({
-                "word": w,
-                "offset_ms": current_time * 1000.0,
-                "duration_ms": word_dur * 1000.0
-            })
-            current_time += word_dur
-        return word_boundaries
 
     def generate_tts_audio(self, text: str, output_name: str, is_ssml: bool = False) -> str:
         """
-        Synthesizes script text into an MP3 file.
-        Cascade: Edge TTS (free, no API key) → Azure SDK → Azure REST → Offline mockup.
-        Uses voice specified by self.voice_name.
-        Processes bracket tags like [sigh] or [whisper]...[/whisper] to enrich narration.
+        Synthesizes script text into an MP3 file using Azure Cognitive Services Speech SDK.
+        Processes bracket tags like [sigh], [breathing], [whisper]...[/whisper] into
+        Azure SSML mstts tags for a rich, emotional voice persona.
+        Generates word-level timestamps from Azure SDK for precise kinetic subtitles.
+        Hard-stops on any error — no fallback, no silent placeholder.
         """
         output_path = os.path.join(self.assets_dir, f"{output_name}.mp3")
 
-        # ── Cascade 0: Edge TTS (free, no API key, good quality) ──────────
-        try:
-            return self._generate_edge_tts(text, output_path)
-        except Exception as edge_err:
-            print(f"[AssetGen] Edge TTS unavailable ({edge_err}). Trying gTTS...")
+        # Verify Azure credentials
+        if not self.azure_speech_key or self.azure_speech_key == "YourAzureSpeechKeyHere":
+            raise ValueError("Azure Speech subscription key not configured. Set AZURE_SPEECH_KEY in .env.")
 
-        # ── Cascade 1: gTTS (Google TTS, free, good quality) ─────────────
-        try:
-            import gtts
-            import re as _re
-            clean_text = _re.sub(r'<[^>]*>', '', text)
-            clean_text = _re.sub(r'\[[\w\s_/-]+\]', '', clean_text).strip()
-            clean_text = _re.sub(r'([.!?])([A-Za-z])', r'\1 \2', clean_text)
-            if clean_text.strip():
-                tts = gtts.gTTS(clean_text, lang='en', tld='com', slow=False)
-                tts.save(output_path)
-                if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                    print(f"[AssetGen] gTTS audio generated: {output_path}")
-                    return output_path
-        except Exception as gtts_err:
-            print(f"[AssetGen] gTTS unavailable ({gtts_err}). Falling back to Azure...")
-
-        # Pre-process brackets into Azure SSML tags (for Azure/offline fallback)
+        # Process human-readable bracket cues into Azure SSML mstts tags
         text_with_cues = self._process_brackets_to_ssml(text)
-        
-        # Format the text into standard Azure Speech SSML
+
+        # Build full SSML document with voice and prosody
         if is_ssml:
             inner_text = text_with_cues.strip()
-            # If the text already has a root <speak> element, strip it to avoid duplicates
             if inner_text.startswith("<speak>"):
                 inner_text = inner_text[7:]
             if inner_text.endswith("</speak>"):
                 inner_text = inner_text[:-8]
-            
             processed_text = (
                 f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
                 f'xmlns:mstts="https://www.w3.org/2001/mstts" '
@@ -417,7 +231,6 @@ class AssetGenerator:
                 f'</speak>'
             )
         else:
-            # Wrap plain text in SSML to apply the configured voice and default speaking rate
             processed_text = (
                 f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
                 f'xmlns:mstts="https://www.w3.org/2001/mstts" '
@@ -430,9 +243,9 @@ class AssetGenerator:
                 f'</speak>'
             )
 
-        # Concurrency Lock (Azure Free Tier allows max 1 concurrent request)
+        # Concurrency lock (Azure Free Tier allows 1 concurrent request)
         lock_file = os.path.join(self.assets_dir, "azure_tts.lock")
-        
+
         with _azure_tts_thread_lock:
             start_time = time.time()
             timeout = 300.0
@@ -445,7 +258,6 @@ class AssetGenerator:
                         break
                     except FileExistsError:
                         try:
-                            # Stale lock recovery (e.g. if previous process crashed hard)
                             mtime = os.path.getmtime(lock_file)
                             if (time.time() - mtime) > 60.0:
                                 print(f"[AssetGen] Stale lock file detected (age: {time.time() - mtime:.1f}s). Removing: {lock_file}")
@@ -454,81 +266,66 @@ class AssetGenerator:
                                 break
                         except Exception:
                             pass
-                    
                     if (time.time() - start_time) > timeout:
                         raise TimeoutError(f"Timeout waiting for Azure TTS lock on {lock_file}")
-                    
                     time.sleep(delay + random.uniform(0.0, 0.2))
-                
-                # Cascade 1: Azure Cognitive Services Speech SDK
-                try:
-                    if not self.azure_speech_key or self.azure_speech_key == "YourAzureSpeechKeyHere":
-                        raise ValueError("Azure Speech subscription key not configured.")
-                        
-                    import azure.cognitiveservices.speech as speechsdk
-                    
-                    speech_config = speechsdk.SpeechConfig(subscription=self.azure_speech_key, region=self.azure_speech_region)
-                    audio_config = speechsdk.audio.AudioConfig(filename=output_path)
-                    
-                    # Use MP3 format (or PCM which MoviePy can read, but mp3 is standard here)
-                    # Default mp3 format is 24khz 96kbps mono
-                    speech_config.set_speech_synthesis_output_format(
-                        speechsdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3
-                    )
-                    
-                    synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-                    
-                    word_boundaries = []
-                    def on_word_boundary(evt):
-                        # Azure SDK v2+ returns timedelta, older versions return ticks (100-ns units)
-                        offset = evt.audio_offset
-                        duration = evt.duration
-                        import datetime
-                        if isinstance(offset, datetime.timedelta):
-                            offset_ms = offset.total_seconds() * 1000.0
-                        else:
-                            offset_ms = offset / 10000.0
-                        if isinstance(duration, datetime.timedelta):
-                            duration_ms = duration.total_seconds() * 1000.0
-                        else:
-                            duration_ms = duration / 10000.0
-                        word_boundaries.append({
-                            "word": evt.text,
-                            "offset_ms": offset_ms,
-                            "duration_ms": duration_ms,
-                        })
-                    synthesizer.synthesis_word_boundary.connect(on_word_boundary)
 
-                    print(f"[AssetGen] Requesting Azure SDK TTS (Voice={self.voice_name}, Region={self.azure_speech_region}) for: '{text[:50]}...'")
-                    result = synthesizer.speak_ssml_async(processed_text).get()
-                    
-                    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-                        print(f"[AssetGen] TTS Audio generated: {output_path}")
-                        self._write_srt_from_word_boundaries(word_boundaries, output_path)
-                        return output_path
+                # ── Azure Cognitive Services Speech SDK (sole TTS provider) ──
+                import azure.cognitiveservices.speech as speechsdk
+
+                speech_config = speechsdk.SpeechConfig(
+                    subscription=self.azure_speech_key,
+                    region=self.azure_speech_region
+                )
+                audio_config = speechsdk.audio.AudioConfig(filename=output_path)
+                speech_config.set_speech_synthesis_output_format(
+                    speechsdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3
+                )
+
+                synthesizer = speechsdk.SpeechSynthesizer(
+                    speech_config=speech_config,
+                    audio_config=audio_config
+                )
+
+                # Word-level timestamps for kinetic subtitles
+                word_boundaries = []
+
+                def on_word_boundary(evt):
+                    offset = evt.audio_offset
+                    duration = evt.duration
+                    import datetime
+                    if isinstance(offset, datetime.timedelta):
+                        offset_ms = offset.total_seconds() * 1000.0
                     else:
-                        # SDK 1.50+: cancellation_details is a property on the result object
-                        details = result.cancellation_details if hasattr(result, 'cancellation_details') else None
-                        error_msg = f"Azure SDK Synthesis failed: {result.reason}"
-                        if details and details.reason == speechsdk.CancellationReason.Error:
-                            error_msg += f" (Error details: {details.error_details})"
-                        raise RuntimeError(error_msg)
-                        
-                except Exception as sdk_err:
-                    print(f"[AssetGen] Azure Speech SDK failed ({sdk_err}). Trying Azure REST API fallback...")
-                    
-                    # Cascade 2: Azure Speech REST API Fallback
-                    try:
-                        res_path = self._generate_azure_rest_tts(processed_text, output_path)
-                        w_bounds = self._estimate_word_boundaries(text, output_path)
-                        self._write_srt_from_word_boundaries(w_bounds, output_path)
-                        return res_path
-                    except Exception as rest_err:
-                        # All TTS methods exhausted. No silent fallback.
-                        raise RuntimeError(
-                            f"[AssetGen] ALL TTS providers failed: Edge TTS, gTTS, Azure SDK, Azure REST. "
-                            f"Last error: {rest_err}. Cannot produce video without voiceover."
-                        ) from rest_err
+                        offset_ms = offset / 10000.0
+                    if isinstance(duration, datetime.timedelta):
+                        duration_ms = duration.total_seconds() * 1000.0
+                    else:
+                        duration_ms = duration / 10000.0
+                    word_boundaries.append({
+                        "word": evt.text,
+                        "offset_ms": offset_ms,
+                        "duration_ms": duration_ms,
+                    })
+
+                synthesizer.synthesis_word_boundary.connect(on_word_boundary)
+
+                print(f"[AssetGen] Azure SDK TTS → Voice: {self.voice_name}, Region: {self.azure_speech_region}")
+                result = synthesizer.speak_ssml_async(processed_text).get()
+
+                if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+                        raise RuntimeError("Azure SDK reported success but produced empty output file.")
+                    print(f"[AssetGen] TTS Audio generated: {output_path} ({len(word_boundaries)} word timestamps)")
+                    self._write_srt_from_word_boundaries(word_boundaries, output_path)
+                    return output_path
+                else:
+                    details = result.cancellation_details if hasattr(result, 'cancellation_details') else None
+                    error_msg = f"Azure SDK Synthesis failed: {result.reason}"
+                    if details and details.reason == speechsdk.CancellationReason.Error:
+                        error_msg += f" | Error: {details.error_details}"
+                    raise RuntimeError(error_msg)
+
             finally:
                 if fd is not None:
                     try:
@@ -541,96 +338,7 @@ class AssetGenerator:
                 except Exception:
                     pass
 
-    def _generate_azure_rest_tts(self, ssml_text: str, output_path: str) -> str:
-        """Fallback to generate TTS audio using Azure REST API directly (no SDK dependency)."""
-        import requests
-        
-        if not self.azure_speech_key or self.azure_speech_key == "YourAzureSpeechKeyHere":
-            raise ValueError("Azure Speech API Key is not configured for REST API.")
-            
-        url = f"https://{self.azure_speech_region}.tts.speech.microsoft.com/cognitiveservices/v1"
-        headers = {
-            "Ocp-Apim-Subscription-Key": self.azure_speech_key,
-            "Content-Type": "application/ssml+xml",
-            "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
-            "User-Agent": "TheDailyAudit"
-        }
-        print(f"[AssetGen] Requesting Azure REST TTS (Voice={self.voice_name}) for: '{ssml_text[:50]}...'")
-        response = requests.post(url, headers=headers, data=ssml_text.encode('utf-8'), timeout=15)
-        if response.status_code == 200:
-            with open(output_path, "wb") as f:
-                f.write(response.content)
-            print(f"[AssetGen] Azure REST TTS Audio generated: {output_path}")
-            return output_path
-        else:
-            raise Exception(f"Azure REST TTS request failed with status {response.status_code}: {response.text}")
 
-    def _generate_offline_mockup_audio(self, text: str, output_path: str) -> str:
-        """Fallback to synthesize lightweight offline mockup MP3 using pyttsx3 or ffmpeg silent generation."""
-        try:
-            import pyttsx3
-            engine = pyttsx3.init()
-            engine.save_to_file(text, output_path)
-            engine.runAndWait()
-            print(f"[AssetGen] Offline mock audio synthesized: {output_path}")
-            return output_path
-        except Exception as e:
-            print(f"[AssetGen] pyttsx3 offline synthesizer not available ({e}). Attempting dynamic FFmpeg silent generation...")
-            
-            # Estimate audio duration based on word count (approx 135 words per minute ~ 2.25 words per second) plus safety padding
-            words = len(text.split())
-            estimated_duration = max(5, int(words / 2.25) + 3)
-            
-            import subprocess
-            try:
-                import imageio_ffmpeg
-                ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
-            except ImportError:
-                ffmpeg_exe = "ffmpeg"
-                
-            try:
-                # Generate a valid, clean silent MP3 file matching the estimated script duration
-                cmd = [
-                    ffmpeg_exe, "-y",
-                    "-f", "lavfi",
-                    "-i", "anullsrc=r=44100:cl=mono",
-                    "-t", str(estimated_duration),
-                    "-acodec", "libmp3lame",
-                    output_path
-                ]
-                
-                startupinfo = None
-                if os.name == 'nt':
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                
-                subprocess.run(
-                    cmd, 
-                    check=True, 
-                    startupinfo=startupinfo, 
-                    stdout=subprocess.DEVNULL, 
-                    stderr=subprocess.DEVNULL
-                )
-                print(f"[AssetGen] Silent placeholder MP3 of {estimated_duration}s generated using FFmpeg: {output_path}")
-                return output_path
-            except Exception as ffmpeg_err:
-                print(f"[AssetGen] FFmpeg silent generation failed ({ffmpeg_err}). Writing tiny fallback MP3...")
-                # Tiny valid 1-frame silent MP3 base64
-                import base64
-                silent_mp3_b64 = (
-                    "SUQzBAAAAAAAAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAbXA0MgBUWFhYAAAAEgAAA21pbm9yX3ZlcnNpb24AM"
-                    "QBUWFhYAAAAHAAAA2NvbXBhdGlibGVfYnJhbmRzAG1wNDJpc29tAFRFTgAAAA4AAAMAd2RDcmVhdG9yAFAA//"
-                    "MUxAAAAAAAAAAAAAAAIEAElgQD5nAPgAADA8A/gQD5gAD8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-                    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-                )
-                missing_padding = len(silent_mp3_b64) % 4
-                if missing_padding:
-                    silent_mp3_b64 += "=" * (4 - missing_padding)
-                with open(output_path, "wb") as f:
-                    f.write(base64.b64decode(silent_mp3_b64))
-                print(f"[AssetGen] Fallback tiny silent placeholder MP3 written: {output_path}")
-                return output_path
 
     def _generate_flux_image(self, prompt: str, output_path: str, aspect_ratio: str = "9:16") -> Optional[str]:
         """

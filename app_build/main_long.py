@@ -293,7 +293,7 @@ def run_long_pipeline():
     intro_text = random.choice(INTRO_TEXTS)
     try:
         intro_audio = asset_gen.generate_tts_audio(
-            f"<prosody pitch='0st' rate='0.95'>{intro_text}. Today, we audit: {topic}.</prosody>",
+            f"<prosody pitch='+0st' rate='0.95'>{intro_text}. Today, we audit: {topic}.</prosody>",
             f"long_intro_{timestamp}", is_ssml=True
         )
         print(f"[main_long] Intro TTS: '{intro_text}'")
@@ -303,19 +303,11 @@ def run_long_pipeline():
 
     # Chapter TTS — parallel
     def _gen_chapter_tts(i, ch):
-        try:
-            rate = 0.97 if i < num_chapters // 3 else (0.95 if i < num_chapters * 2 // 3 else 0.93)
-            pitch = "0st" if i < num_chapters * 2 // 3 else "-0.5st"
-            ssml = f"<prosody pitch='{pitch}' rate='{rate}'>{ch.content}</prosody>"
-            path = asset_gen.generate_tts_audio(ssml, f"long_ch{i}_{timestamp}", is_ssml=True)
-            return (i, path)
-        except Exception as e:
-            print(f"[main_long] WARNING: Ch.{i+1} TTS failed: {e}")
-            silent = asset_gen._generate_silent_placeholder(
-                os.path.join(asset_gen.assets_dir, f"long_ch{i}_{timestamp}.mp3"),
-                duration_ms=max(3000, len(ch.content) * 60)
-            )
-            return (i, silent)
+        rate = 0.97 if i < num_chapters // 3 else (0.95 if i < num_chapters * 2 // 3 else 0.93)
+        pitch = "+0st" if i < num_chapters * 2 // 3 else "-0.5st"
+        ssml = f"<prosody pitch='{pitch}' rate='{rate}'>{ch.content}</prosody>"
+        path = asset_gen.generate_tts_audio(ssml, f"long_ch{i}_{timestamp}", is_ssml=True)
+        return (i, path)
 
     chapter_audios = [None] * num_chapters
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
@@ -330,7 +322,7 @@ def run_long_pipeline():
     climax = script.climax
     try:
         outro_audio = asset_gen.generate_tts_audio(
-            f"<prosody pitch='0st' rate='0.95'>{climax} {outro_text} "
+            f"<prosody pitch='+0st' rate='0.95'>{climax} {outro_text} "
             f"This has been The Daily Audit. The truth doesn't change. Subscribe so you never miss it.</prosody>",
             f"long_outro_{timestamp}", is_ssml=True
         )
