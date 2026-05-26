@@ -3039,9 +3039,36 @@ class VideoEngine:
         frame_f = frame.astype(np.float32)
         frame_f = frame_f * (1.0 - theme["strength"]) + tint_arr * theme["strength"]
         result = np.clip(frame_f, 0, 255).astype(np.uint8)
-        return result
 
-    # ── End Sprint B ─────────────────────────────────────────────────────
+    # ── Color Temperature Tint ─────────────────────────────────────────────
+
+    def _create_color_tint(self, size: tuple, duration: float, warm: bool = True):
+        """
+        Creates a semi-transparent color temperature overlay.
+        warm=True: amber/orange tint (~2800K) for explanation/mechanism scenes
+        warm=False: cool blue tint (~7000K) for truth/reveal scenes
+        Returns a MoviePy ImageClip that can be composited over a scene.
+        """
+        from PIL import Image, ImageDraw
+        try:
+            from moviepy.editor import ImageClip
+        except ImportError:
+            from moviepy import ImageClip
+
+        w, h = size
+        if warm:
+            # Amber/orange glow — warmth, trust, "let me explain"
+            color = (255, 160, 40, 30)  # RGBA: warm amber, ~12% opacity
+        else:
+            # Cool blue cast — cold, clinical, "here's the harsh truth"
+            color = (40, 120, 255, 35)  # RGBA: icy blue, ~14% opacity
+
+        img = Image.new("RGBA", (w, h), color)
+        clip = ImageClip(img).with_duration(duration)
+        return clip
+
+    # ── End Color Temperature Tint ────────────────────────────────────────
+
 
     def _create_scene_clip(self, bg_source: Any, card_images: List[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, audio_clip: Optional[Any] = None, mid_roll_word_indices: Optional[set] = None, is_last_scene: bool = False, audio_path: Optional[str] = None,
                             emotion_beats: Optional[list] = None, stamp_text: Optional[str] = None,
@@ -5056,6 +5083,25 @@ class VideoEngine:
                 )
                 
                 # We do not set the audio on individual content video clips to prevent MoviePy from dropping offsets.
+                
+                # ── Color Temperature Tint (v2.1) ──────────────────────────
+                # Scene 2 (explanation/mechanism): warm amber — builds trust
+                # Scene 3 (truth/reveal): cold blue — clinical, harsh truth
+                if i == 1 and not is_bizarre:
+                    try:
+                        from moviepy.editor import CompositeVideoClip
+                    except ImportError:
+                        from moviepy import CompositeVideoClip
+                    tint = self._create_color_tint((1080, 1920), content_durations[i], warm=True)
+                    scene_clip = CompositeVideoClip([scene_clip, tint])
+                elif i == 2 and not is_bizarre:
+                    try:
+                        from moviepy.editor import CompositeVideoClip
+                    except ImportError:
+                        from moviepy import CompositeVideoClip
+                    tint = self._create_color_tint((1080, 1920), content_durations[i], warm=False)
+                    scene_clip = CompositeVideoClip([scene_clip, tint])
+                
                 content_video_clips.append(scene_clip)
                 
                 # If not the last scene, create transition clip
