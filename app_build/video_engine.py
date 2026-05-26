@@ -3049,6 +3049,7 @@ class VideoEngine:
         warm=False: cool blue tint (~7000K) for truth/reveal scenes
         Returns a MoviePy ImageClip that can be composited over a scene.
         """
+        import tempfile, os
         from PIL import Image, ImageDraw
         try:
             from moviepy.editor import ImageClip
@@ -3064,7 +3065,16 @@ class VideoEngine:
             color = (40, 120, 255, 35)  # RGBA: icy blue, ~14% opacity
 
         img = Image.new("RGBA", (w, h), color)
-        clip = ImageClip(img).with_duration(duration)
+        # MoviePy v2 ImageClip requires a file path, not a PIL Image
+        tint_tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        img.save(tint_tmp.name)
+        tint_tmp.close()
+        clip = ImageClip(tint_tmp.name).with_duration(duration)
+        # Schedule cleanup after clip is no longer needed
+        try:
+            clip._cleanup_tint_path = tint_tmp.name
+        except Exception:
+            pass
         return clip
 
     # ── End Color Temperature Tint ────────────────────────────────────────
