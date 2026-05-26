@@ -64,9 +64,9 @@ class YouTubeUploader:
                         creds = None
                 
                 if not creds:
-                    print("[Uploader] Initiating initial YouTube OAuth browser authentication...")
+                    print("[Uploader] Initiating YouTube OAuth (manual browser auth)...")
                     flow = InstalledAppFlow.from_client_secrets_file(self.client_secrets_path, upload_scopes)
-                    creds = flow.run_local_server(port=0, prompt="consent")
+                    creds = flow.run_local_server(port=0, prompt="consent", open_browser=False)
                 
                 # Save credentials for future headless daily scheduled runs
                 with open(self.credentials_path, "w") as token:

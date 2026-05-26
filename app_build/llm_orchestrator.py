@@ -3,7 +3,7 @@
 # =============================================================================
 import os
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
 from pydantic import BaseModel, Field
 
 # Dynamic script types (used by generate_dynamic_script)
@@ -101,6 +101,33 @@ class ShortBizarrePayload(BaseModel):
         description="A provocative, question-oriented comment related to the bizarre anomaly to pin in the comments section. "
                     "Examples: 'Would you have believed this actually happened?', 'What is the strangest mystery you know?', 'Do you think this file should have stayed classified?'"
     )
+
+# ── Unified 5-Beat Script Schema ──────────────────────────────────────────
+
+class DailyAuditScriptPayload(BaseModel):
+    """Unified schema for all 4 content types with 5-beat structure.
+    Word budget: 90-100 target, 110 max for Shorts 60s cap."""
+    
+    content_type: Literal["myth", "bizarre_truth", "hidden_truth", "paradox"] = Field(
+        description="Content classification that determines hook formula and persona")
+    topic: str = Field(description="The topic being debunked/explained/revealed")
+    category: str = Field(description="Discipline: Biology, Physics, History, Neuroscience, etc.")
+    
+    beat1_hook: str = Field(description="COMPLICITY HOOK (12-20 words). Trap the viewer immediately.")
+    beat2_pivot: str = Field(description="SENSORY CONFIRMATION + PIVOT (15-22 words). Must include 'Except' or 'But' as pivot.")
+    beat3_mechanism: str = Field(description="MECHANISM WALK (30-45 words). Physical steps + one analogy using a familiar object.")
+    beat4_reframe: str = Field(description="REFRAME LANDING (15-22 words). 'You weren't fooled by X — you were fooled by Y.'")
+    beat5_signoff: str = Field(description="SIGN-OFF (5-10 words). 'Case closed.', 'File sealed.', 'Audit complete.'")
+    
+    visual_hook: str = Field(description="Image search query for beat 1 scene")
+    visual_mechanism: str = Field(description="Image search query for beat 2-3 scenes")
+    visual_reframe: str = Field(description="Image search query for beat 4 scene")
+    
+    youtube_metadata: YouTubeMetadataSchema
+    comment_hook: str = Field(description="Provocative comment to pin on YouTube")
+    mid_roll_hook: Optional[str] = Field(default="", description="Optional 3-5 word retention hook")
+    word_count: Optional[int] = Field(default=0, description="Total words across all 5 beats")
+
 
 class SmartModelsProxy:
     def __init__(self, parent_client):
@@ -209,6 +236,7 @@ class LLMOrchestrator:
         
         self.client = None
         self._init_client()
+        self._orchestrator = None  # lazy-init PipelineOrchestrator
 
     def _init_client(self):
         """Initializes the SmartGeminiClient client wrapper."""
@@ -747,9 +775,9 @@ class LLMOrchestrator:
         from google.genai import types
 
         try:
-            print(f"[LLM] Generating long-form script with Gemini 2.5 Pro for topic: '{topic}'...")
+            print(f"[LLM] Generating long-form script with Gemini 3.1 Pro for topic: '{topic}'...")
             response = self.client.models.generate_content(
-                model='gemini-2.5-pro',
+                model='gemini-3.1-pro',
                 contents=user_prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
@@ -782,6 +810,241 @@ class LLMOrchestrator:
                   f"{len(ch.content.split())} words)")
 
         return payload
+
+
+    # ═══════════════════════════════════════════════════════════════════════
+    #  Content Type Classification & Structured Script Generation
+    # ═══════════════════════════════════════════════════════════════════════
+
+    CONTENT_TYPE_PROMPTS = {
+        "myth": """You are 'The Auditor' — a sharp, confident investigator who debunks myths.
+CONTENT TYPE: MYTH — the viewer already believes something false.
+HOOK FORMULA: 'You [did/believed/saw] [the myth]. [Sensory confirmation]. [One more beat of them being right].'
+PIVOT: 'Except [one sentence that cracks the foundation of their belief].'
+MECHANISM RULES: Physical step 1. Physical step 2. One analogy: 'Think of a [familiar object]...' Step 3 — what ACTUALLY happens.
+REFRAME RULES: 'You weren't fooled by [surface explanation] — you were fooled by [the real, more interesting mechanism].'
+TONE: Slightly smug. You enjoy being right. Contractions, dashes, rhetorical questions.""",
+
+        "bizarre_truth": """You are 'The Auditor' — an investigator who finds bizarre, declassified truths fascinating.
+CONTENT TYPE: BIZARRE TRUTH — viewer has never heard of this, it sounds impossible.
+HOOK FORMULA: '[Impossible-sounding statement]. No asterisks. Literally true.'
+PIVOT: 'That breaks [the mental model they hold about how the world works].'
+MECHANISM RULES: Physical step 1. Physical step 2. One analogy. Step 3 — the thing that makes it actually work.
+REFRAME RULES: 'The universe isn't [what they assumed]. It's [the real thing], and here's exactly why.'
+TONE: Dramatic, conversational, slightly irreverent. You're sharing a secret nobody told them.""",
+
+        "hidden_truth": """You are 'The Auditor' — an investigator who reveals things the world kept secret.
+CONTENT TYPE: HIDDEN TRUTH — this exists/happened but was never widely communicated.
+HOOK FORMULA: '[This thing] exists. You were never told about it. Here's why that's strange.'
+PIVOT: 'And the part nobody mentions is...'
+MECHANISM RULES: The hidden mechanism. What was suppressed or overlooked. One analogy. Why it matters now.
+REFRAME RULES: 'The world kept this from you — not through conspiracy, but through [the real reason]. Now you know.'
+TONE: Conspiratorial but factual. You're letting them in on something exclusive.""",
+
+        "paradox": """You are 'The Auditor' — an investigator who reveals where reality bends.
+CONTENT TYPE: PARADOX — two true things that contradict each other.
+HOOK FORMULA: '[Statement A] is true. [Statement B] is true. These cannot both be true.'
+PIVOT: 'They are. Here's where reality bends.'
+MECHANISM RULES: Why A seems true. Why B seems true. The hidden connection that resolves both. One analogy.
+REFRAME RULES: 'The universe is less consistent than you assumed. And that's somehow fine — here's the reason.'
+TONE: Genuinely fascinated. You're not smug — you're sharing wonder at how weird reality is.""",
+    }
+
+    SCRAPE_SAFETY = " -wikipedia -politics -war -violence -gore -adult"
+
+    def classify_content_type(self, topic: str, category: str, description: str = "") -> str:
+        """Quick classification call to determine which content type this topic is.
+        Uses Gemini Flash — cheap, ~100 tokens."""
+        prompt = (
+            "Classify this topic into exactly ONE content type:\n"
+            "- myth: viewer already believes something false that you will debunk\n"
+            "- bizarre_truth: viewer has never heard of this, it sounds impossible but is true\n"
+            "- hidden_truth: this exists/happened but was never widely communicated to the public\n"
+            "- paradox: two true things that contradict each other, and the explanation makes it weirder\n\n"
+            f"Topic: {topic}\nCategory: {category}\nDescription: {description}\n\n"
+            "Return ONLY the type name: myth, bizarre_truth, hidden_truth, or paradox."
+        )
+        
+        try:
+            if self.client == "legacy":
+                import google.generativeai as legacy_genai
+                model = legacy_genai.GenerativeModel(model_name='gemini-1.5-flash')
+                response = model.generate_content(prompt)
+                result = response.text.strip().lower()
+            else:
+                from google.genai import types
+                response = self.client.client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=prompt,
+                    config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=20)
+                )
+                result = response.text.strip().lower()
+            
+            for t in ["myth", "bizarre_truth", "hidden_truth", "paradox"]:
+                if t in result:
+                    print(f"[LLM] Content type classified: {t}")
+                    return t
+            print(f"[LLM] Classifier returned ambiguous: '{result}'. Defaulting to myth.")
+            return "myth"
+        except Exception as e:
+            print(f"[LLM] Content type classification failed: {e}. Defaulting to myth.")
+            return "myth"
+
+    def scrape_research_context(self, topic: str) -> str:
+        """Scrape Wikipedia + DuckDuckGo for research context. Returns raw text."""
+        import requests, urllib.parse
+        
+        context_parts = []
+        
+        try:
+            wiki_url = (
+                "https://en.wikipedia.org/w/api.php?"
+                "action=query&format=json&prop=extracts&exintro=1&explaintext=1&"
+                f"titles={urllib.parse.quote(topic)}"
+            )
+            r = requests.get(wiki_url, headers={"User-Agent": "TheDailyAudit/1.0"}, timeout=10)
+            if r.status_code == 200:
+                pages = r.json().get("query", {}).get("pages", {})
+                for page in pages.values():
+                    extract = page.get("extract", "")
+                    if extract and len(extract) > 50:
+                        context_parts.append(f"[Wikipedia] {extract[:800]}")
+                        break
+        except Exception as e:
+            print(f"[LLM] Wikipedia scrape failed: {e}")
+        
+        try:
+            ddg_url = f"https://api.duckduckgo.com/?q={urllib.parse.quote(topic + self.SCRAPE_SAFETY)}&format=json"
+            r = requests.get(ddg_url, headers={"User-Agent": "TheDailyAudit/1.0"}, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                abstract = data.get("AbstractText", "")
+                if abstract and len(abstract) > 30:
+                    context_parts.append(f"[DuckDuckGo] {abstract[:500]}")
+                related = data.get("RelatedTopics", [])
+                for rt in related[:2]:
+                    if isinstance(rt, dict) and rt.get("Text"):
+                        context_parts.append(f"[Related] {rt['Text'][:300]}")
+        except Exception as e:
+            print(f"[LLM] Web scrape failed: {e}")
+        
+        result = "\n\n".join(context_parts) if context_parts else ""
+        if result:
+            print(f"[LLM] Research context: {len(result)} chars from {len(context_parts)} sources")
+        else:
+            print("[LLM] No research context found")
+        return result
+
+    def _build_type_prompt(self, content_type: str, topic: str, category: str, research: str):
+        """Build system + user prompts for script generation."""
+        type_prompt = self.CONTENT_TYPE_PROMPTS.get(content_type, self.CONTENT_TYPE_PROMPTS["myth"])
+        
+        research_block = ""
+        if research:
+            research_block = f"\n\nRESEARCH CONTEXT (use these verified facts, do not fabricate):\n{research}\n"
+        
+        system = (
+            f"{type_prompt}\n\n"
+            "CRITICAL RULES:\n"
+            "- Total word count across all 5 beats: 90-110 words (target 100). Count your words.\n"
+            "- NEVER use: 'furthermore', 'studies show', 'scientists say', 'research indicates', 'interestingly'\n"
+            "- Use contractions: you've, it's, don't, that's, here's\n"
+            "- Each beat must be complete. No trailing sentence fragments.\n"
+            "- The mechanism walk MUST include one analogy: 'Think of a [familiar object]...'\n"
+            "- The reframe MUST follow: 'You weren't fooled by X — you were fooled by Y.'\n"
+            "- Return valid JSON conforming to DailyAuditScriptPayload schema only."
+        )
+        
+        user = (
+            f"TOPIC: {topic}\nCATEGORY: {category}\nCONTENT TYPE: {content_type}\n"
+            f"{research_block}"
+            "Generate the complete 5-beat script as DailyAuditScriptPayload JSON."
+        )
+        
+        return system, user
+
+    def generate_structured_script(self, topic: str, category: str, 
+                                     description: str = "", 
+                                     scraped_research: str = "") -> "DailyAuditScriptPayload":
+        """Unified script generation with content classification, research, and 5-beat structure."""
+        import re
+        
+        content_type = self.classify_content_type(topic, category, description)
+        
+        if not scraped_research:
+            scraped_research = self.scrape_research_context(topic)
+        
+        research_context = scraped_research
+        try:
+            if self._orchestrator is None:
+                from pipeline.orchestrator import PipelineOrchestrator
+                self._orchestrator = PipelineOrchestrator(self.client)
+            
+            if scraped_research:
+                print("[LLM] Running 2-pass research pipeline...")
+                pipeline_output = self._orchestrator.run_research_pipeline(topic, scraped_research)
+                if pipeline_output:
+                    insight_text = json.dumps(pipeline_output, indent=2)[:2000]
+                    research_context = f"{scraped_research}\n\n[Pipeline Insights]\n{insight_text}"
+        except Exception as e:
+            print(f"[LLM] Research pipeline skipped: {e}")
+        
+        system_instruction, user_prompt = self._build_type_prompt(
+            content_type, topic, category, research_context
+        )
+        
+        print(f"[LLM] Generating {content_type} script for '{topic}'...")
+        
+        if self.client == "legacy":
+            import google.generativeai as legacy_genai
+            model = legacy_genai.GenerativeModel(
+                model_name='gemini-1.5-pro',
+                generation_config={"response_mime_type": "application/json"}
+            )
+            full_prompt = f"System Directive:\n{system_instruction}\n\nSchema:\n{DailyAuditScriptPayload.schema_json()}\n\nInput:\n{user_prompt}"
+            response = model.generate_content(full_prompt)
+            result = json.loads(response.text)
+        else:
+            from google.genai import types
+            full_prompt = (
+                f"{system_instruction}\n\n"
+                f"OUTPUT SCHEMA (strict JSON):\n{DailyAuditScriptPayload.schema_json()}\n\n"
+                f"{user_prompt}"
+            )
+            response = self.client.client.models.generate_content(
+                model='gemini-2.5-pro',
+                contents=full_prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.7
+                )
+            )
+            result = json.loads(response.text)
+        
+        result["content_type"] = content_type
+        result["topic"] = topic
+        result["category"] = category
+        
+        beat_text = " ".join([
+            result.get("beat1_hook", ""), result.get("beat2_pivot", ""),
+            result.get("beat3_mechanism", ""), result.get("beat4_reframe", ""),
+            result.get("beat5_signoff", ""),
+        ])
+        beat_text = re.sub(r'<[^>]+>', '', beat_text)
+        result["word_count"] = len(beat_text.split())
+        
+        print(f"[LLM] Script generated: {result['word_count']} words, type={content_type}")
+        if result["word_count"] > 110:
+            print(f"[LLM] WARNING: {result['word_count']} words exceeds 110 cap.")
+        
+        return DailyAuditScriptPayload(**result)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    #  Legacy methods (kept for backward compatibility)
+    # ═══════════════════════════════════════════════════════════════════════
+
+    #  Legacy methods (kept for backward compatibility)
+    # ═══════════════════════════════════════════════════════════════════════
 
     @staticmethod
     def calculate_word_count(payload: Dict[str, Any]) -> int:

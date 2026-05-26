@@ -1,10 +1,11 @@
 # =============================================================================
-# "The Daily Audit" - Asset Generation Module (TTS & Imagen)
+# "The Daily Audit" - Asset Generation Module (TTS & Image Gen)
 # =============================================================================
 import os
 import re
 import time
 import random
+import base64
 import threading
 from typing import Tuple, Optional
 from PIL import Image, ImageDraw
@@ -12,7 +13,7 @@ from PIL import Image, ImageDraw
 _azure_tts_thread_lock = threading.Lock()
 
 class AssetGenerator:
-    """Generates the TTS audio (GCP TTS) and the vintage schematic background image (Gemini/Imagen)."""
+    """Generates TTS audio and vintage schematic background images (FLUX-2-pro primary, Imagen fallback)."""
 
     def __init__(self, gemini_client=None, gcp_credentials_path: Optional[str] = None,
                  azure_speech_key: Optional[str] = None, azure_speech_region: Optional[str] = None,
@@ -376,7 +377,23 @@ class AssetGenerator:
         try:
             return self._generate_edge_tts(text, output_path)
         except Exception as edge_err:
-            print(f"[AssetGen] Edge TTS unavailable ({edge_err}). Falling back to Azure...")
+            print(f"[AssetGen] Edge TTS unavailable ({edge_err}). Trying gTTS...")
+
+        # ── Cascade 1: gTTS (Google TTS, free, good quality) ─────────────
+        try:
+            import gtts
+            import re as _re
+            clean_text = _re.sub(r'<[^>]*>', '', text)
+            clean_text = _re.sub(r'\[[\w\s_/-]+\]', '', clean_text).strip()
+            clean_text = _re.sub(r'([.!?])([A-Za-z])', r'\1 \2', clean_text)
+            if clean_text.strip():
+                tts = gtts.gTTS(clean_text, lang='en', tld='com', slow=False)
+                tts.save(output_path)
+                if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    print(f"[AssetGen] gTTS audio generated: {output_path}")
+                    return output_path
+        except Exception as gtts_err:
+            print(f"[AssetGen] gTTS unavailable ({gtts_err}). Falling back to Azure...")
 
         # Pre-process brackets into Azure SSML tags (for Azure/offline fallback)
         text_with_cues = self._process_brackets_to_ssml(text)
@@ -507,17 +524,11 @@ class AssetGenerator:
                         self._write_srt_from_word_boundaries(w_bounds, output_path)
                         return res_path
                     except Exception as rest_err:
-                        print(f"[AssetGen] Azure REST API fallback failed ({rest_err}). Synthesizing offline mockup audio...")
-                        
-                        # Cascade 3: Offline Mockup Audio
-                        import re
-                        # Clean both XML and bracket emotion cues before sending to offline mockup
-                        plain_text = re.sub(r'<[^>]*>', '', text)
-                        plain_text = re.sub(r'\[[\w\s_/-]+\]', '', plain_text).strip()
-                        res_path = self._generate_offline_mockup_audio(plain_text, output_path)
-                        w_bounds = self._estimate_word_boundaries(plain_text, output_path)
-                        self._write_srt_from_word_boundaries(w_bounds, output_path)
-                        return res_path
+                        # All TTS methods exhausted. No silent fallback.
+                        raise RuntimeError(
+                            f"[AssetGen] ALL TTS providers failed: Edge TTS, gTTS, Azure SDK, Azure REST. "
+                            f"Last error: {rest_err}. Cannot produce video without voiceover."
+                        ) from rest_err
             finally:
                 if fd is not None:
                     try:
@@ -621,26 +632,87 @@ class AssetGenerator:
                 print(f"[AssetGen] Fallback tiny silent placeholder MP3 written: {output_path}")
                 return output_path
 
+    def _generate_flux_image(self, prompt: str, output_path: str, aspect_ratio: str = "9:16") -> Optional[str]:
+        """
+        Primary image generation via DeepInfra FLUX-2-pro.
+        Returns output_path on success, None on failure.
+        """
+        try:
+            import openai
+        except ImportError:
+            print("[AssetGen] openai package not installed — install with: pip install openai")
+            return None
+
+        api_key = os.getenv("DEEPINFRA_API_KEY")
+        if not api_key:
+            print("[AssetGen] DEEPINFRA_API_KEY not set in .env — skipping FLUX")
+            return None
+
+        # Map aspect ratio to FLUX-supported sizes
+        size_map = {"9:16": "1024x1824", "16:9": "1824x1024", "1:1": "1024x1024"}
+        size = size_map.get(aspect_ratio, "1024x1824")
+
+        try:
+            client = openai.OpenAI(
+                base_url="https://api.deepinfra.com/v1/openai",
+                api_key=api_key
+            )
+            response = client.images.generate(
+                prompt=prompt,
+                model="black-forest-labs/FLUX-2-pro",
+                n=1,
+                size=size,
+            )
+
+            if hasattr(response.data[0], 'b64_json') and response.data[0].b64_json:
+                image_data = base64.b64decode(response.data[0].b64_json)
+                with open(output_path, "wb") as f:
+                    f.write(image_data)
+                print(f"[AssetGen] FLUX-2-pro SUCCESS: {output_path}")
+                return output_path
+            else:
+                print("[AssetGen] FLUX-2-pro returned no image data")
+                return None
+
+        except Exception as e:
+            print(f"[AssetGen] FLUX-2-pro failed: {type(e).__name__} - {e}")
+            return None
+
     def generate_background_image(self, visual_prompt: str, output_name: str, aspect_ratio: str = "9:16", is_blueprint: bool = True, style_suffix: str = None) -> str:
         """
         Generates the vintage CRT/declassified blueprint or realistic fact showcase image.
-        Cascade-tests a list of verified working models (Imagen 4.0 and Gemini 2.5/3.0)
-        with automatic failover, falling back to programmatic drawing as the final resort.
+        CASCADE: FLUX-2-pro (primary), then Imagen/Gemini (secondary fallback), then programmatic blueprint.
         """
         output_path = os.path.join(self.assets_dir, f"{output_name}.png")
         
-        # Build the exact prompt requested by the mission rules
+        # ── Build enhanced detailed prompt ────────────────────────────────
         if is_blueprint:
-            suffix = style_suffix or "Style of a declassified government document, dark blue and white blueprint, highly detailed."
+            suffix = style_suffix or (
+                "Style of a declassified government document, dark navy blue and cyan-white blueprint aesthetic, "
+                "technical schematic grid lines, vintage CRT monitor scanlines, classified stamp, high contrast, "
+                "dramatic lighting, photorealistic textures, no cartoon or illustration style, no text labels"
+            )
             styled_prompt = (
                 f"{visual_prompt}. "
-                f"{suffix} "
-                "High contrast, realistic, highly detailed, no cartoons, no text."
+                f"{suffix}. "
+                f"4K resolution, ultra-detailed, cinematic composition, moody atmosphere, "
+                f"professional color grading, sharp focus."
             )
         else:
-            styled_prompt = visual_prompt
-        
-        # Check if the modern Google GenAI Client is set up and supports image generation
+            styled_prompt = (
+                f"{visual_prompt}. "
+                f"Photorealistic, 4K resolution, ultra-detailed, dramatic lighting, "
+                f"cinematic composition, professional color grading, sharp focus, "
+                f"no cartoon or illustration style, no text or watermarks."
+            )
+
+        # ── CASCADE 0: FLUX-2-pro (PRIMARY) ──────────────────────────────
+        print(f"[AssetGen] CASCADE 0: Trying FLUX-2-pro (primary)...")
+        flux_result = self._generate_flux_image(styled_prompt, output_path, aspect_ratio)
+        if flux_result:
+            return flux_result
+
+        # ── CASCADE 1: Google Imagen/Gemini (SECONDARY FALLBACK) ─────────
         if self.gemini_client is not None and not isinstance(self.gemini_client, str):
             try:
                 from google import genai

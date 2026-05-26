@@ -45,6 +45,33 @@ scratch_*
 tmp/
 temp/
 
+# One-off rebuild / debug scripts
+_compile_*.py
+_recompile_*.py
+rebuild_*.py
+reauth*.py
+upload_fixed*.py
+
+# TTS & subtitle rebuild artifacts
+app_build/assets/tts_*
+app_build/assets/fast_*
+app_build/assets/local_subtitles_*
+app_build/assets/rebuild_*
+app_build/assets/*_combined_*.srt
+*.words.json
+
+# Leaked SRT files outside assets/
+app_build/EP.*.srt
+
+# Debug frames & test files
+app_build/assets/*.jpg
+app_build/gtts_*
+app_build/test_tts.*
+
+# Broken/backup media
+*_backup
+*_broken_backup
+
 # OS files
 Thumbs.db
 .DS_Store

@@ -339,8 +339,8 @@ def run_pipeline():
             # Generate structured script payload from Gemini
             script_payload = None
             try:
-                print("[Local] Calling Gemini to construct structured short script...")
-                script_payload = orchestrator.generate_script(topic, category, description)
+                print("[Local] Calling Gemini to construct structured 5-beat script...")
+                script_payload = orchestrator.generate_structured_script(topic, category, description)
                 episode_num = ingestion.get_next_episode()
                 script_payload["episode_num"] = episode_num
                 word_count = LLMOrchestrator.calculate_word_count(script_payload)
@@ -358,9 +358,11 @@ def run_pipeline():
                 sys.exit(1)
 
             # Compile speech text in rich SSML format
-            hook_clean = script_payload.get('hook', '').strip()
-            context_clean = script_payload.get('context', '').strip()
-            fact_clean = script_payload.get('fact', '').strip()
+            # Extract 5-beat script
+            hook_clean = getattr(script_payload, 'beat1_hook', '') or script_payload.get('beat1_hook', '') or script_payload.get('hook', '')
+            context_clean = getattr(script_payload, 'beat3_mechanism', '') or script_payload.get('beat3_mechanism', '') or script_payload.get('context', '')
+            fact_clean = getattr(script_payload, 'beat4_reframe', '') or script_payload.get('beat4_reframe', '') or script_payload.get('fact', '')
+            beat5 = getattr(script_payload, 'beat5_signoff', '') or script_payload.get('beat5_signoff', '') or 'Class dismissed.'
 
             # Generate 5 audio files: [starting, s1, s2, s3, ending]
             audio_paths = []
@@ -419,73 +421,107 @@ def run_pipeline():
                 print(f"[Local] ERROR: Asset Generator failed to create scene TTS MP3s: {e}")
                 sys.exit(1)
 
+            # ── IMAGE ACQUISITION: Scrape-first, AI-fallback ──────────────────
             image_myth_path = None
-            try:
-                image_myth_name = f"background_myth_{timestamp}"
-                visual_prompt_myth = script_payload.get("myth_visual_prompt", "Technical blueprint representing the false myth")
-                print(f"[Local] Requesting visual representing the FALSE MYTH: '{visual_prompt_myth}'")
-                # Append content safety instruction: no politics, no gore, no people, safe for teen+
-                safe_suffix = " No human faces, no political content, no violence, no text, safe for all ages."
-                image_myth_path = asset_gen.generate_background_image(visual_prompt_myth + safe_suffix, image_myth_name, aspect_ratio="9:16", is_blueprint=True, style_suffix=style_suffix)
-            except Exception as e:
-                print(f"[Local] ERROR: Myth background image generation failed: {e}")
-                sys.exit(1)
-
             image_truth_path = None
-            try:
-                image_truth_name = f"foreground_fact_{timestamp}"
-                visual_prompt_truth = script_payload.get("fact_visual_prompt", "Realistic laboratory or historical archive photography representing the scientific truth")
-                print(f"[Local] Requesting visual representing the TRUTH/REALITY: '{visual_prompt_truth}'")
-                safe_suffix = " No human faces, no political content, no violence, no text, safe for all ages."
-                image_truth_path = asset_gen.generate_background_image(visual_prompt_truth + safe_suffix, image_truth_name, aspect_ratio="1:1", is_blueprint=False)
-            except Exception as e:
-                print(f"[Local] WARNING: Truth foreground image generation failed: {e}. Gracefully falling back to background-only rendering.")
-                image_truth_path = None
-
-            # ── Sprint 7: Visual Variety — Wikipedia scraping + extra Imagen images ──
             extra_images = []
-            try:
-                from data_scraper import DataScraper
-                scraper = DataScraper()
-                # Build search queries for Wikipedia: topic + related concepts
-                wiki_queries = [topic]
-                if hook_clean:
-                    # Extract key nouns from hook for additional searches
-                    hook_words = [w for w in hook_clean.split() if len(w) > 4]
-                    if hook_words:
-                        wiki_queries.append(' '.join(hook_words[:3]))
-                if fact_clean:
-                    fact_words = [w for w in fact_clean.split() if len(w) > 4]
-                    if fact_words:
-                        wiki_queries.append(' '.join(fact_words[:3]))
-                wiki_images = scraper.fetch_multiple_wikipedia_images(
-                    wiki_queries,
-                    f"wiki_{timestamp}",
-                    max_images=3
-                )
-                extra_images.extend(wiki_images)
-                print(f"[Local] Wikipedia images fetched: {len(wiki_images)}")
-            except ImportError:
-                print("[Local] DataScraper not available — skipping Wikipedia image fetch")
-            except Exception as e:
-                print(f"[Local] Wikipedia image fetch failed: {e}")
 
-            # Generate 1 extra Imagen image for scene 2 context variety
-            extra_imagen_path = None
             try:
-                extra_img_name = f"context_extra_{timestamp}"
-                extra_prompt = script_payload.get("context_visual_prompt")
-                if not extra_prompt:
-                    extra_prompt = f"Scientific illustration showing {topic}, detailed, realistic, high contrast"
-                extra_imagen_path = asset_gen.generate_background_image(
-                    extra_prompt + " No politics, no violence, no human faces, safe for all ages.", extra_img_name,
-                    aspect_ratio="1:1", is_blueprint=False
-                )
-                if extra_imagen_path:
-                    extra_images.append(extra_imagen_path)
-                    print(f"[Local] Extra context image generated: {extra_imagen_path}")
-            except Exception as e:
-                print(f"[Local] Extra image generation failed (non-fatal): {e}")
+                scraper = DataScraper()
+            except Exception:
+                scraper = None
+
+            # Try scraping for myth image
+            if scraper:
+                try:
+                    scraped_myth = scraper.fetch_image_multi_source(
+                        topic, f"myth_scraped_{timestamp}"
+                    )
+                    if scraped_myth and os.path.exists(scraped_myth):
+                        image_myth_path = scraped_myth
+                        print(f"[Local] Scraped myth image: {scraped_myth}")
+                except Exception as e:
+                    print(f"[Local] Myth image scrape failed: {e}")
+
+            # Try scraping for truth image
+            if scraper:
+                try:
+                    truth_keywords = ' '.join([w for w in topic.split() if len(w) > 3][:3]) or topic
+                    scraped_truth = scraper.fetch_image_multi_source(
+                        truth_keywords, f"truth_scraped_{timestamp}"
+                    )
+                    if scraped_truth and os.path.exists(scraped_truth):
+                        image_truth_path = scraped_truth
+                        print(f"[Local] Scraped truth image: {scraped_truth}")
+                except Exception as e:
+                    print(f"[Local] Truth image scrape failed: {e}")
+
+            # Scrape Wikipedia for extra context images
+            if scraper:
+                try:
+                    wiki_queries = [topic]
+                    if hook_clean:
+                        hook_words = [w for w in hook_clean.split() if len(w) > 4]
+                        if hook_words:
+                            wiki_queries.append(' '.join(hook_words[:3]))
+                    if fact_clean:
+                        fact_words = [w for w in fact_clean.split() if len(w) > 4]
+                        if fact_words:
+                            wiki_queries.append(' '.join(fact_words[:3]))
+                    wiki_images = scraper.fetch_multiple_wikipedia_images(
+                        wiki_queries, f"wiki_{timestamp}", max_images=3
+                    )
+                    extra_images.extend(wiki_images)
+                    print(f"[Local] Wikipedia extra images: {len(wiki_images)}")
+                except ImportError:
+                    print("[Local] DataScraper not available — skipping Wikipedia")
+                except Exception as e:
+                    print(f"[Local] Wikipedia extra fetch failed: {e}")
+
+            # ── Step 2: AI generation as FALLBACK for missing images ─────────
+            visual_prompt_myth = getattr(script_payload, "visual_hook", None) or script_payload.get("visual_hook") or script_payload.get("myth_visual_prompt", "Technical blueprint representing the false myth")
+            visual_prompt_truth = getattr(script_payload, "visual_mechanism", None) or script_payload.get("visual_mechanism") or script_payload.get("fact_visual_prompt", "Realistic laboratory photography representing the scientific truth")
+            safe_suffix = " No human faces, no political content, no violence, no text, safe for all ages."
+
+            if not image_myth_path:
+                try:
+                    image_myth_name = f"background_myth_{timestamp}"
+                    print(f"[Local] Scraping failed for myth image. Generating with AI: '{visual_prompt_myth[:60]}...'")
+                    image_myth_path = asset_gen.generate_background_image(
+                        visual_prompt_myth + safe_suffix, image_myth_name,
+                        aspect_ratio="9:16", is_blueprint=True, style_suffix=style_suffix
+                    )
+                except Exception as e:
+                    print(f"[Local] ERROR: Myth background image generation failed: {e}")
+                    sys.exit(1)
+
+            if not image_truth_path:
+                try:
+                    image_truth_name = f"foreground_fact_{timestamp}"
+                    print(f"[Local] Scraping failed for truth image. Generating with AI: '{visual_prompt_truth[:60]}...'")
+                    image_truth_path = asset_gen.generate_background_image(
+                        visual_prompt_truth + safe_suffix, image_truth_name,
+                        aspect_ratio="1:1", is_blueprint=False
+                    )
+                except Exception as e:
+                    print(f"[Local] WARNING: Truth image generation failed: {e}. Falling back to myth image.")
+                    image_truth_path = image_myth_path
+
+            if len(extra_images) < 3:
+                try:
+                    extra_img_name = f"context_extra_{timestamp}"
+                    extra_prompt = script_payload.get("context_visual_prompt")
+                    if not extra_prompt:
+                        extra_prompt = f"Scientific illustration showing {topic}, detailed, realistic, high contrast"
+                    extra_path = asset_gen.generate_background_image(
+                        extra_prompt + " No politics, no violence, no human faces, safe for all ages.",
+                        extra_img_name, aspect_ratio="1:1", is_blueprint=False
+                    )
+                    if extra_path:
+                        extra_images.append(extra_path)
+                        print(f"[Local] AI-generated extra context image: {extra_path}")
+                except Exception as e:
+                    print(f"[Local] Extra image generation failed (non-fatal): {e}")
 
             # Build image_paths_override: [wiki1, myth_bg, wiki2, extra_imagen, wiki3, truth_fg, ...]
             image_paths_override = []
@@ -551,10 +587,10 @@ def run_pipeline():
 
             # 2. Generate structured script payload from Gemini
             try:
-                print("[Local] Calling Gemini to construct bizarre fact script payload...")
-                bizarre_payload = orchestrator.generate_bizarre_fact(topic, category)
+                print("[Local] Calling Gemini to construct structured 5-beat bizarre script...")
+                bizarre_payload = orchestrator.generate_structured_script(topic, category)
                 episode_num = ingestion.get_next_episode()
-                bizarre_payload["episode_num"] = episode_num
+                bizarre_payload.episode_num = episode_num
                 print(f"[Local] Anomaly script generated: '{bizarre_payload.get('hook')}' | Episode: {episode_num}")
             except Exception as e:
                 print(f"[Local] ERROR: Anomaly script generation failed: {e}")
@@ -571,9 +607,9 @@ def run_pipeline():
 
             # 4. Scrape 3 images from multiple sources for immersive scenes
             scene_queries = [
-                bizarre_payload.get("illustration_query", topic),
-                bizarre_payload.get("scene_query_2", "") or bizarre_payload.get("illustration_query", topic),
-                bizarre_payload.get("scene_query_3", "") or bizarre_payload.get("illustration_query", topic),
+                getattr(bizarre_payload, "visual_hook", "") or bizarre_payload.get("visual_hook", topic),
+                getattr(bizarre_payload, "visual_mechanism", "") or bizarre_payload.get("visual_mechanism", topic),
+                getattr(bizarre_payload, "visual_reframe", "") or bizarre_payload.get("visual_reframe", topic),
             ]
 
             scraped_bizarre_images = []
@@ -604,9 +640,12 @@ def run_pipeline():
             image_truth_path = scraped_bizarre_images[-1]
 
             # 5. Generate TTS Audio with 5-part structure (starting, s1, s2, s3, ending)
-            hook_clean = bizarre_payload.get('hook', '').strip()
-            why_bizarre = bizarre_payload.get('why_bizarre', '').strip()
-            closing_statement = bizarre_payload.get('closing_statement', '').strip()
+            # Extract 5-beat script
+            hook_clean = getattr(bizarre_payload, 'beat1_hook', '') or bizarre_payload.get('beat1_hook', '') or bizarre_payload.get('hook', '')
+            beat2 = getattr(bizarre_payload, 'beat2_pivot', '') or bizarre_payload.get('beat2_pivot', '')
+            why_bizarre = getattr(bizarre_payload, 'beat3_mechanism', '') or bizarre_payload.get('beat3_mechanism', '') or bizarre_payload.get('why_bizarre', '')
+            closing_statement = getattr(bizarre_payload, 'beat4_reframe', '') or bizarre_payload.get('beat4_reframe', '') or bizarre_payload.get('closing_statement', '')
+            beat5 = getattr(bizarre_payload, 'beat5_signoff', '') or bizarre_payload.get('beat5_signoff', '') or 'Class dismissed.'
             
             audio_paths = []
             try:

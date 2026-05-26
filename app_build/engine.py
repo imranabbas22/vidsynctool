@@ -81,7 +81,7 @@ def load_config(path: Optional[str] = None) -> dict:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.yaml")
 
     defaults = {
-        "general": {"canvas_width": 1080, "canvas_height": 1920, "fps": 30},
+        "general": {"canvas_width": 1080, "canvas_height": 1920, "fps": 25},
         "subtitles": {"chars_per_second": 33, "y_position": 1540, "max_lines": 2,
                        "lookahead_ms": 200, "font_size": 52, "emphasis_scale_factor": 68},
         "vignette": {"max_darken": 0.35, "power_curve": 1.8, "edge_distance_factor": 1.8},

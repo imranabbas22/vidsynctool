@@ -264,6 +264,72 @@ def split_bizarre_ssml(ssml_script, hook_clean, why_bizarre, closing_statement):
     return s1_ssml, s2_ssml, s3_ssml
 
 
+def verify_video_audio(video_path: str) -> None:
+    """Post-render check: ensure video has a non-silent audio stream.
+    Raises RuntimeError if audio is missing or silent, preventing silent
+    videos from being uploaded."""
+    import subprocess, json, os
+    # Find ffprobe
+    ffprobe = "ffprobe"
+    try:
+        import imageio_ffmpeg
+        ffmpeg_dir = os.path.dirname(imageio_ffmpeg.get_ffmpeg_exe())
+        candidate = os.path.join(ffmpeg_dir, "ffprobe.exe" if os.name == 'nt' else "ffprobe")
+        if os.path.exists(candidate):
+            ffprobe = candidate
+    except Exception:
+        pass
+
+    startupinfo = None
+    if os.name == 'nt':
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+    # Check audio stream exists
+    probe = subprocess.run(
+        [ffprobe, "-v", "quiet", "-print_format", "json", "-show_streams", video_path],
+        capture_output=True, text=True, timeout=15, startupinfo=startupinfo
+    )
+    if probe.returncode != 0:
+        raise RuntimeError(f"ffprobe failed on output video: {probe.stderr[-200:]}")
+
+    streams = json.loads(probe.stdout).get("streams", [])
+    audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
+    if not audio_streams:
+        raise RuntimeError(
+            f"OUTPUT VIDEO HAS NO AUDIO STREAM: {video_path}. "
+            "Pipeline aborted to prevent publishing a silent video."
+        )
+
+    # Check audio isn't silent (max_volume > -60 dB = actual sound)
+    vol = subprocess.run(
+        [ffprobe, "-v", "quiet", "-f", "lavfi",
+         "-i", f"amovie={video_path},volumedetect",
+         "-show_entries", "frame_tags=lavfi.volume_mean,lavfi.volume_max",
+         "-of", "json"],
+        capture_output=True, text=True, timeout=15, startupinfo=startupinfo
+    )
+    try:
+        frames = json.loads(vol.stdout).get("frames", [])
+        max_db = -100.0
+        for f in frames:
+            tags = f.get("tags", {})
+            v = float(tags.get("lavfi.volume_max", "-100"))
+            if v > max_db:
+                max_db = v
+        if max_db < -50.0:
+            raise RuntimeError(
+                f"OUTPUT VIDEO AUDIO IS SILENT (max_volume={max_db:.0f}dB): {video_path}"
+            )
+        print(f"[Main] Audio verification PASSED: max_volume={max_db:.0f}dB, streams={len(audio_streams)}")
+    except json.JSONDecodeError:
+        print(f"[Main] Audio verification WARNING: couldn't parse volume data — passing on stream presence")
+    except RuntimeError:
+        raise
+    except Exception as e:
+        print(f"[Main] Audio volume check failed ({e}) — passing on stream presence")
+
+
 def run_pipeline():
     """Executes the complete Shorts generation and uploading pipeline."""
     print("=" * 80)
@@ -393,11 +459,11 @@ def run_pipeline():
             # Immediately reserve topic to prevent re-selection if pipeline crashes
             ingestion.log_uploaded_topic(topic, "")
 
-            # Generate structured script payload from Gemini
+            # Generate structured 5-beat script payload from Gemini
             script_payload = None
             try:
-                print("[Main] Calling Gemini to construct structured short script...")
-                script_payload = orchestrator.generate_script(topic, category, description)
+                print("[Main] Calling Gemini to construct structured 5-beat script...")
+                script_payload = orchestrator.generate_structured_script(topic, category, description)
                 episode_num = ingestion.get_next_episode()
                 script_payload["episode_num"] = episode_num
                 word_count = LLMOrchestrator.calculate_word_count(script_payload)
@@ -415,10 +481,25 @@ def run_pipeline():
                 print(f"[Main] CRITICAL: Failed to initialize Asset Generator: {e}")
                 sys.exit(1)
 
-            # Compile speech text in rich SSML format
-            hook_clean = script_payload.get('hook', '').strip()
-            context_clean = script_payload.get('context', '').strip()
-            fact_clean = script_payload.get('fact', '').strip()
+            # ── Extract 5-beat script ──────────────────────────────────────
+            # Map beats to 3 scenes: 1+2→scene1, 3→scene2, 4→scene3, 5→bumper
+            beat1 = getattr(script_payload, 'beat1_hook', '') or script_payload.get('beat1_hook', '')
+            beat2 = getattr(script_payload, 'beat2_pivot', '') or script_payload.get('beat2_pivot', '')
+            beat3 = getattr(script_payload, 'beat3_mechanism', '') or script_payload.get('beat3_mechanism', '')
+            beat4 = getattr(script_payload, 'beat4_reframe', '') or script_payload.get('beat4_reframe', '')
+            beat5 = getattr(script_payload, 'beat5_signoff', '') or script_payload.get('beat5_signoff', '')
+
+            # Fallback: if no beats found, use old-style payload fields
+            if not beat1:
+                beat1 = script_payload.get('hook', '')
+                beat2 = ''  # old format has no pivot
+                beat3 = script_payload.get('context', '')
+                beat4 = script_payload.get('fact', '')
+                beat5 = script_payload.get('sign_off', 'Class dismissed.')
+                print("[Main] Using legacy script format (no 5-beat structure)")
+
+            content_type = getattr(script_payload, 'content_type', 'myth') if hasattr(script_payload, 'content_type') else 'myth'
+            print(f"[Main] Content type: {content_type} | Word count: {script_payload.get('word_count', '?')}")
 
             # Generate 5 audio files: [starting, s1, s2, s3, ending]
             audio_paths = []
@@ -433,38 +514,24 @@ def run_pipeline():
                 starting_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{starting_text}</prosody>"
                 print(f"[Main] Myth Starting Bumper: '{starting_text}'")
 
-                # --- Ending bumper TTS using signature sign-off ---
-                sign_off = script_payload.get("sign_off", "Class dismissed.")
-                ending_text = f"{cta_text} {sign_off}"
+                # --- Ending bumper TTS using beat5 sign-off ---
+                ending_text = f"{cta_text} {beat5}" if beat5 else cta_text
                 ending_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{ending_text}</prosody>"
-                print(f"[Main] Myth Ending Bumper: '{ending_text}' (sign-off: '{sign_off}')")
+                print(f"[Main] Myth Ending Bumper: '{ending_text}'")
 
-                # Determine raw ssml script
-                if "ssml_script" in script_payload:
-                    ssml_raw = script_payload["ssml_script"]
-                else:
-                    ssml_raw = (
-                        f"{hook_clean}"
-                        f"<break time='700ms'/>"
-                        f"{context_clean}"
-                        f"<break time='1200ms'/>"
-                        f"{fact_clean}"
-                    )
-                
-                # Split SSML into 3 content scenes (no CTA/sign-off)
-                s1_ssml, s2_ssml, s3_ssml = split_myth_ssml(
-                    ssml_raw, hook_clean, context_clean, fact_clean
-                )
-                
-                # Per-scene prosody: subtle variation, no voice degradation
-                # All scenes use near-normal rate; the dramatic shift comes from SFX/music
+                # Build SSML for 3 content scenes from 5 beats
+                s1_ssml = f"{beat1}<break time='500ms'/>{beat2}"
+                s2_ssml = beat3
+                s3_ssml = beat4
+
+                # Per-scene prosody
                 s1_ssml_wrapped = f"<prosody pitch='0st' rate='0.97'>{s1_ssml}</prosody>"
                 s2_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{s2_ssml}</prosody>"
                 s3_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.93'>{s3_ssml}</prosody>"
-                
-                print(f"[Main] Myth Scene 1 SSML: {s1_ssml_wrapped}")
-                print(f"[Main] Myth Scene 2 SSML: {s2_ssml_wrapped}")
-                print(f"[Main] Myth Scene 3 SSML: {s3_ssml_wrapped}")
+
+                print(f"[Main] Scene 1 (beat1+2): {beat1[:60]}...")
+                print(f"[Main] Scene 2 (beat3): {beat3[:60]}...")
+                print(f"[Main] Scene 3 (beat4): {beat4[:60]}...")
                 
                 # Build 5-element audio paths for content scenes and bumpers
                 audio_paths = [
@@ -478,84 +545,141 @@ def run_pipeline():
                 print(f"[Main] ERROR: Asset Generator failed to create scene TTS MP3s: {e}")
                 sys.exit(1)
 
+            # ── IMAGE ACQUISITION: Scrape-first, AI-fallback ──────────────────
+            # Step 1: Scrape Wikipedia for ALL needed images first (cost-free)
             image_myth_path = None
-            try:
-                image_myth_name = f"background_myth_{timestamp}"
-                visual_prompt_myth = script_payload.get("myth_visual_prompt", "Technical blueprint representing the false myth")
-                print(f"[Main] Requesting visual representing the FALSE MYTH: '{visual_prompt_myth}'")
-                safe_suffix = " No human faces, no political content, no violence, no text, safe for all ages."
-                image_myth_path = asset_gen.generate_background_image(visual_prompt_myth + safe_suffix, image_myth_name, aspect_ratio="9:16", is_blueprint=True, style_suffix=style_suffix)
-            except Exception as e:
-                print(f"[Main] ERROR: Myth background image generation failed: {e}")
-                sys.exit(1)
-
             image_truth_path = None
-            try:
-                image_truth_name = f"foreground_fact_{timestamp}"
-                visual_prompt_truth = script_payload.get("fact_visual_prompt", "Realistic laboratory or historical archive photography representing the scientific truth")
-                print(f"[Main] Requesting visual representing the TRUTH/REALITY: '{visual_prompt_truth}'")
-                safe_suffix = " No human faces, no political content, no violence, no text, safe for all ages."
-                image_truth_path = asset_gen.generate_background_image(visual_prompt_truth + safe_suffix, image_truth_name, aspect_ratio="1:1", is_blueprint=False)
-            except Exception as e:
-                print(f"[Main] WARNING: Truth foreground image generation failed: {e}. Gracefully falling back to background-only rendering.")
-                image_truth_path = None
-
-            # ── Sprint 7: Visual Variety — Wikipedia scraping + context images ──
             extra_images = []
-            try:
-                from data_scraper import DataScraper
-                scraper = DataScraper()
-                wiki_queries = [topic]
-                if hook_clean:
-                    hook_words = [w for w in hook_clean.split() if len(w) > 4]
-                    if hook_words:
-                        wiki_queries.append(' '.join(hook_words[:3]))
-                if fact_clean:
-                    fact_words = [w for w in fact_clean.split() if len(w) > 4]
-                    if fact_words:
-                        wiki_queries.append(' '.join(fact_words[:3]))
-                wiki_images = scraper.fetch_multiple_wikipedia_images(
-                    wiki_queries, f"wiki_{timestamp}", max_images=3
-                )
-                extra_images.extend(wiki_images)
-                print(f"[Main] Wikipedia images fetched: {len(wiki_images)}")
-            except ImportError:
-                print("[Main] DataScraper not available — skipping Wikipedia image fetch")
-            except Exception as e:
-                print(f"[Main] Wikipedia image fetch failed: {e}")
-
-            # Generate 1 extra Imagen image for scene 2 context variety
-            try:
-                extra_img_name = f"context_extra_{timestamp}"
-                extra_prompt = script_payload.get("context_visual_prompt",
-                    f"Scientific illustration showing {topic}, detailed, realistic, high contrast")
-                extra_path = asset_gen.generate_background_image(
-                    extra_prompt + " No politics, no violence, no human faces, safe for all ages.", extra_img_name,
-                    aspect_ratio="1:1", is_blueprint=False
-                )
-                if extra_path:
-                    extra_images.append(extra_path)
-                    print(f"[Main] Extra context image generated: {extra_path}")
-            except Exception as e:
-                print(f"[Main] Extra image generation failed (non-fatal): {e}")
-
-            # Generate a dedicated verdict image for scene 3 (the FINAL LESSON card)
             verdict_image_path = None
-            verdict_prompt = script_payload.get("verdict_visual_prompt", f"Symbolic visual representing the final truth about {topic}, forensic evidence, case closed, official seal")
-            safe_suffix = " No human faces, no political content, no violence, no text, safe for all ages."
+
             try:
-                verdict_name = f"verdict_reveal_{timestamp}"
-                print(f"[Main] Requesting visual for FINAL VERDICT scene: '{verdict_prompt[:60]}...'")
-                verdict_image_path = asset_gen.generate_background_image(
-                    verdict_prompt + safe_suffix,
-                    verdict_name,
-                    aspect_ratio="9:16",
-                    is_blueprint=True,
-                    style_suffix=style_suffix
-                )
-            except Exception as e:
-                print(f"[Main] WARNING: Verdict image generation failed: {e}. Falling back to truth image.")
-                verdict_image_path = image_truth_path or image_myth_path
+                scraper = DataScraper()
+            except Exception:
+                scraper = None
+
+            # Try scraping for myth image
+            if scraper:
+                try:
+                    myth_query = topic
+                    scraped_myth = scraper.fetch_image_multi_source(
+                        myth_query, f"myth_scraped_{timestamp}"
+                    )
+                    if scraped_myth and os.path.exists(scraped_myth):
+                        image_myth_path = scraped_myth
+                        print(f"[Main] Scraped myth image: {scraped_myth}")
+                except Exception as e:
+                    print(f"[Main] Myth image scrape failed: {e}")
+
+            # Try scraping for truth image
+            if scraper:
+                try:
+                    truth_keywords = ' '.join([w for w in topic.split() if len(w) > 3][:3]) or topic
+                    scraped_truth = scraper.fetch_image_multi_source(
+                        truth_keywords, f"truth_scraped_{timestamp}"
+                    )
+                    if scraped_truth and os.path.exists(scraped_truth):
+                        image_truth_path = scraped_truth
+                        print(f"[Main] Scraped truth image: {scraped_truth}")
+                except Exception as e:
+                    print(f"[Main] Truth image scrape failed: {e}")
+
+            # Scrape Wikipedia for extra context images
+            if scraper:
+                try:
+                    wiki_queries = [topic]
+                    if hook_clean:
+                        hook_words = [w for w in hook_clean.split() if len(w) > 4]
+                        if hook_words:
+                            wiki_queries.append(' '.join(hook_words[:3]))
+                    if fact_clean:
+                        fact_words = [w for w in fact_clean.split() if len(w) > 4]
+                        if fact_words:
+                            wiki_queries.append(' '.join(fact_words[:3]))
+                    wiki_images = scraper.fetch_multiple_wikipedia_images(
+                        wiki_queries, f"wiki_{timestamp}", max_images=3
+                    )
+                    extra_images.extend(wiki_images)
+                    print(f"[Main] Wikipedia extra images: {len(wiki_images)}")
+                except ImportError:
+                    print("[Main] DataScraper not available — skipping Wikipedia")
+                except Exception as e:
+                    print(f"[Main] Wikipedia extra fetch failed: {e}")
+
+            # Try scraping for verdict image
+            if scraper:
+                try:
+                    verdict_keywords = topic
+                    scraped_verdict = scraper.fetch_image_multi_source(
+                        verdict_keywords, f"verdict_scraped_{timestamp}"
+                    )
+                    if scraped_verdict and os.path.exists(scraped_verdict):
+                        verdict_image_path = scraped_verdict
+                        print(f"[Main] Scraped verdict image: {scraped_verdict}")
+                except Exception as e:
+                    print(f"[Main] Verdict image scrape failed: {e}")
+
+            # ── Step 2: AI generation as FALLBACK for missing images ─────────
+            visual_prompt_myth = getattr(script_payload, 'visual_hook', None) or script_payload.get('visual_hook') or script_payload.get('myth_visual_prompt', "Technical blueprint representing the false myth")
+            visual_prompt_truth = getattr(script_payload, 'visual_mechanism', None) or script_payload.get('visual_mechanism') or script_payload.get('fact_visual_prompt', "Realistic laboratory photography representing the scientific truth")
+            safe_suffix = " No human faces, no political content, no violence, no text, safe for all ages."
+
+            # Myth image — AI fallback if scraping failed
+            if not image_myth_path:
+                try:
+                    image_myth_name = f"background_myth_{timestamp}"
+                    print(f"[Main] Scraping failed for myth image. Generating with AI: '{visual_prompt_myth[:60]}...'")
+                    image_myth_path = asset_gen.generate_background_image(
+                        visual_prompt_myth + safe_suffix, image_myth_name,
+                        aspect_ratio="9:16", is_blueprint=True, style_suffix=style_suffix
+                    )
+                except Exception as e:
+                    print(f"[Main] ERROR: Myth background image generation failed: {e}")
+                    sys.exit(1)
+
+            # Truth image — AI fallback if scraping failed
+            if not image_truth_path:
+                try:
+                    image_truth_name = f"foreground_fact_{timestamp}"
+                    print(f"[Main] Scraping failed for truth image. Generating with AI: '{visual_prompt_truth[:60]}...'")
+                    image_truth_path = asset_gen.generate_background_image(
+                        visual_prompt_truth + safe_suffix, image_truth_name,
+                        aspect_ratio="1:1", is_blueprint=False
+                    )
+                except Exception as e:
+                    print(f"[Main] WARNING: Truth image generation failed: {e}. Falling back to myth image.")
+                    image_truth_path = image_myth_path
+
+            # Extra context image — AI fallback only if we have < 3 scraped extras
+            if len(extra_images) < 3:
+                try:
+                    extra_img_name = f"context_extra_{timestamp}"
+                    extra_prompt = getattr(script_payload, 'visual_mechanism', None) or script_payload.get('visual_mechanism') or script_payload.get('context_visual_prompt')
+                    if not extra_prompt:
+                        extra_prompt = f"Scientific illustration showing {topic}, detailed, realistic, high contrast"
+                    extra_path = asset_gen.generate_background_image(
+                        extra_prompt + " No politics, no violence, no human faces, safe for all ages.",
+                        extra_img_name, aspect_ratio="1:1", is_blueprint=False
+                    )
+                    if extra_path:
+                        extra_images.append(extra_path)
+                        print(f"[Main] AI-generated extra context image: {extra_path}")
+                except Exception as e:
+                    print(f"[Main] Extra image generation failed (non-fatal): {e}")
+
+            # Verdict image — AI fallback if scraping failed
+            if not verdict_image_path:
+                verdict_prompt = getattr(script_payload, 'visual_reframe', None) or script_payload.get('visual_reframe') or script_payload.get('verdict_visual_prompt',
+                    f"Symbolic visual representing the final truth about {topic}, forensic evidence, case closed, official seal")
+                try:
+                    verdict_name = f"verdict_reveal_{timestamp}"
+                    print(f"[Main] Scraping failed for verdict. Generating with AI: '{verdict_prompt[:60]}...'")
+                    verdict_image_path = asset_gen.generate_background_image(
+                        verdict_prompt + safe_suffix, verdict_name,
+                        aspect_ratio="9:16", is_blueprint=True, style_suffix=style_suffix
+                    )
+                except Exception as e:
+                    print(f"[Main] WARNING: Verdict image generation failed: {e}. Falling back to truth image.")
+                    verdict_image_path = image_truth_path or image_myth_path
 
             # Build image override with Wikipedia + extra images for visual variety
             myth_image_paths = [image_myth_path] if image_myth_path else []
@@ -586,6 +710,9 @@ def run_pipeline():
             if "youtube_metadata" in script_payload:
                 script_payload["youtube_metadata"]["title"] = title
             clean_title = re.sub(r'[<>:"/\\|?*#]', '', title).strip().replace(' ', '_')[:100]
+            clean_title = re.sub(r'[\u2013\u2014\u2015]', '-', clean_title)
+            clean_title = re.sub(r'[^\w\.\-\(\)\[\]]', '_', clean_title)
+            clean_title = re.sub(r'_+', '_', clean_title)
 
             try:
                 video_eng = VideoEngine()
@@ -595,6 +722,7 @@ def run_pipeline():
                 script_payload["ending_text"] = ending_text
                 video_path = video_eng.compile_short(image_myth_path, image_truth_path, audio_paths, script_payload, video_name, category, style=video_style, video_type="myth", image_paths_override=myth_image_paths)
                 print(f"[Main] Video assembled and saved successfully: {video_path}")
+                verify_video_audio(video_path)  # Hard-stop if audio is missing/silent
                 # Generate thumbnail using actual video images
                 video_eng.generate_thumbnail(topic, hook_clean, video_name, style=video_style, img_myth_path=image_myth_path, img_truth_path=image_truth_path, episode_num=episode_num)
             except Exception as e:
@@ -621,15 +749,16 @@ def run_pipeline():
             # Immediately reserve topic to prevent re-selection
             ingestion.log_uploaded_topic(topic, "")
 
-            # 2. Generate structured script payload from Gemini
+            # 2. Generate structured 5-beat script payload from Gemini
             try:
-                print("[Main] Calling Gemini to construct bizarre fact script payload...")
-                bizarre_payload = orchestrator.generate_bizarre_fact(topic, category)
+                print("[Main] Calling Gemini to construct structured 5-beat bizarre script...")
+                bizarre_payload = orchestrator.generate_structured_script(topic, category)
                 episode_num = ingestion.get_next_episode()
-                bizarre_payload["episode_num"] = episode_num
-                print(f"[Main] Anomaly script generated: '{bizarre_payload.get('hook')}' | Episode: {episode_num}")
+                bizarre_payload.episode_num = episode_num
+                content_type = bizarre_payload.content_type
+                print(f"[Main] Script generated: {bizarre_payload.word_count} words, type={content_type} | Episode: {episode_num}")
             except Exception as e:
-                print(f"[Main] ERROR: Anomaly script generation failed: {e}")
+                print(f"[Main] ERROR: Script generation failed: {e}")
                 sys.exit(1)
 
             # 3. Initialize Asset Generator and Data Scraper
@@ -641,11 +770,11 @@ def run_pipeline():
                 print(f"[Main] CRITICAL: Failed to initialize asset systems: {e}")
                 sys.exit(1)
 
-            # 4. Scrape images from multiple sources and use Imagen 4 fallback for any scene that fails
+            # 4. Scrape images using visual prompts from 5-beat script
             scene_queries = [
-                bizarre_payload.get("illustration_query", topic),
-                bizarre_payload.get("scene_query_2", "") or bizarre_payload.get("illustration_query", topic),
-                bizarre_payload.get("scene_query_3", "") or bizarre_payload.get("illustration_query", topic),
+                getattr(bizarre_payload, 'visual_hook', '') or bizarre_payload.get('visual_hook', topic),
+                getattr(bizarre_payload, 'visual_mechanism', '') or bizarre_payload.get('visual_mechanism', topic),
+                getattr(bizarre_payload, 'visual_reframe', '') or bizarre_payload.get('visual_reframe', topic),
             ]
 
             scraped_bizarre_images = []
@@ -710,9 +839,47 @@ def run_pipeline():
             image_truth_path = scraped_bizarre_images[-1]
 
             # 5. Generate TTS Audio with 5-part structure (starting, s1, s2, s3, ending)
-            hook_clean = bizarre_payload.get('hook', '').strip()
-            why_bizarre = bizarre_payload.get('why_bizarre', '').strip()
-            closing_statement = bizarre_payload.get('closing_statement', '').strip()
+            # Extract 5-beat script for bizarre path
+            beat1 = getattr(bizarre_payload, 'beat1_hook', '') or bizarre_payload.get('beat1_hook', '')
+            beat2 = getattr(bizarre_payload, 'beat2_pivot', '') or bizarre_payload.get('beat2_pivot', '')
+            beat3 = getattr(bizarre_payload, 'beat3_mechanism', '') or bizarre_payload.get('beat3_mechanism', '')
+            beat4 = getattr(bizarre_payload, 'beat4_reframe', '') or bizarre_payload.get('beat4_reframe', '')
+            beat5 = getattr(bizarre_payload, 'beat5_signoff', '') or bizarre_payload.get('beat5_signoff', '')
+
+            # Fallback to old-style payload
+            if not beat1:
+                beat1 = bizarre_payload.get('hook', '')
+                beat2 = ''
+                beat3 = bizarre_payload.get('why_bizarre', '')
+                beat4 = bizarre_payload.get('closing_statement', '')
+                beat5 = 'Class dismissed.'
+
+            hook_clean = beat1
+            why_bizarre = beat3
+            closing_statement = beat4
+
+            # TTS for 5 audio slots: [starting, s1(hook+pivot), s2(mechanism), s3(reframe), ending]
+            starting_text = random.choice([
+
+                "Classified file just dropped.",
+                "New audit. Pay attention.",
+                "Another lie exposed today.",
+                "Declassified. Watch carefully.",
+            ])
+            starting_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{starting_text}</prosody>"
+            print(f"[Main] Bizarre Starting Bumper: '{starting_text}'")
+
+            ending_text = f"{cta_text} {beat5}" if beat5 else cta_text
+            ending_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{ending_text}</prosody>"
+            print(f"[Main] Bizarre Ending Bumper: '{ending_text}'")
+
+            s1_ssml = f"{beat1}<break time='500ms'/>{beat2}"
+            s2_ssml = beat3
+            s3_ssml = beat4
+
+            s1_ssml_wrapped = f"<prosody pitch='0st' rate='0.97'>{s1_ssml}</prosody>"
+            s2_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{s2_ssml}</prosody>"
+            s3_ssml_wrapped = f"<prosody pitch='-0.5st' rate='0.93'>{s3_ssml}</prosody>"
             
             audio_paths = []
             try:
@@ -727,7 +894,7 @@ def run_pipeline():
                 print(f"[Main] Bizarre Starting Bumper: '{starting_text}'")
 
                 # --- Ending bumper using signature sign-off ---
-                sign_off = script_payload.get("sign_off", "Class dismissed.")
+                sign_off = bizarre_payload.get("sign_off", "Class dismissed.")
                 ending_text = f"{cta_text} {sign_off}"
                 ending_ssml_wrapped = f"<prosody pitch='0st' rate='0.95'>{ending_text}</prosody>"
                 print(f"[Main] Bizarre Ending Bumper: '{ending_text}' (sign-off: '{sign_off}')")
@@ -791,6 +958,9 @@ def run_pipeline():
             if "youtube_metadata" in bizarre_payload:
                 bizarre_payload["youtube_metadata"]["title"] = title
             clean_title = re.sub(r'[<>:"/\\|?*#]', '', title).strip().replace(' ', '_')[:100]
+            clean_title = re.sub(r'[\u2013\u2014\u2015]', '-', clean_title)
+            clean_title = re.sub(r'[^\w\.\-\(\)\[\]]', '_', clean_title)
+            clean_title = re.sub(r'_+', '_', clean_title)
             
             try:
                 video_eng = VideoEngine()
@@ -800,6 +970,7 @@ def run_pipeline():
                     video_name, category, style=video_style, video_type="bizarre"
                 )
                 print(f"[Main] Anomaly Video assembled successfully: {video_path}")
+                verify_video_audio(video_path)  # Hard-stop if audio is missing/silent
                 video_eng.generate_thumbnail(
                     topic, hook_clean, video_name, style=video_style,
                     img_myth_path=scraped_bizarre_images[0], img_truth_path=scraped_bizarre_images[-1],
@@ -931,6 +1102,9 @@ def run_pipeline():
                 "description": base_desc
             }
             clean_title = re.sub(r'[<>:"/\\|?*#]', '', title).strip().replace(' ', '_')[:100]
+            clean_title = re.sub(r'[\u2013\u2014\u2015]', '-', clean_title)
+            clean_title = re.sub(r'[^\w\.\-\(\)\[\]]', '_', clean_title)
+            clean_title = re.sub(r'_+', '_', clean_title)
 
             try:
                 video_eng = VideoEngine()
@@ -959,6 +1133,7 @@ def run_pipeline():
                     ending_text=scene_sequence[-1]["narration_text"]
                 )
                 print(f"[Main] Dynamic video assembled successfully: {video_path}")
+                verify_video_audio(video_path)  # Hard-stop if audio is missing/silent
                 
                 video_eng.generate_thumbnail(
                     topic, scene_sequence[1]["narration_text"] if len(scene_sequence) > 1 else topic,
@@ -1040,7 +1215,7 @@ def run_pipeline():
                         "transition_type": transition_type,
                         "word_count": script_payload.get("word_count", 0) if isinstance(script_payload, dict) else 0,
                         "duration_seconds": None,
-                        "uploaded_at": datetime.utcnow().isoformat() + "Z",
+                        "uploaded_at": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
                         "youtube_video_id": yt_video_id,
                     })
                     print(f"[Main] Analytics entry logged.")

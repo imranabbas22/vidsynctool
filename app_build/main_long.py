@@ -10,9 +10,17 @@
 #   3. Edge TTS generates narration per chapter
 #   4. Wikipedia scraping + Imagen fallback per chapter
 #   5. VideoEngine card generation for each chapter
-#   6. FFmpeg composes: intro → chapters with Ken Burns → outro
+#   6. FFmpeg composes: intro → chapters → outro (PARALLEL, GPU-ACCELERATED)
 #   7. Private draft upload to YouTube + draft to Facebook
 #   8. Output: video file, SRT subtitles, chapter timestamps text
+#
+# RENDER SPEED (target): 10-min video in under 10 minutes total pipeline time
+#   - TTS generation: 2-3 min
+#   - Image scraping: 1-2 min
+#   - Card rendering: ~10s (PIL, fast)
+#   - FFmpeg encoding: ~30-60s (h264_nvenc GPU, parallel chapters)
+#   - Concat: ~2s
+#   - Upload: ~2-3 min
 # =============================================================================
 
 import os
@@ -23,6 +31,7 @@ import random
 import datetime
 import subprocess
 import re
+import concurrent.futures
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -36,14 +45,11 @@ from video_engine import VideoEngine, STYLE_PRESETS
 from data_scraper import DataScraper
 from youtube_uploader import YouTubeUploader
 from facebook_uploader import FacebookUploader
-from analytics_logger import AnalyticsLogger
 
 # ── Constants ────────────────────────────────────────────────────────────
 WIDTH, HEIGHT = 1920, 1080  # 16:9 landscape
 FPS = 30
-TARGET_DURATION_SEC = 600  # ~10 minutes
 
-# The Daily Audit intro bumper text rotation
 INTRO_TEXTS = [
     "The Daily Audit",
     "Classified File Opened",
@@ -56,13 +62,11 @@ OUTRO_TEXTS = [
     "The truth never sleeps. Neither do we.",
 ]
 
-# Style preset (blueprint is the default)
 DEFAULT_STYLE = "blueprint"
 
 
-# ── Helper: Resolve FFmpeg executable ───────────────────────────────────
+# ── FFmpeg helpers ───────────────────────────────────────────────────────
 def _get_ffmpeg():
-    """Resolve ffmpeg path, preferring imageio_ffmpeg bundled copy."""
     try:
         import imageio_ffmpeg
         return imageio_ffmpeg.get_ffmpeg_exe()
@@ -71,16 +75,13 @@ def _get_ffmpeg():
 
 
 def _get_ffprobe():
-    """Resolve ffprobe path."""
     ffmpeg = _get_ffmpeg()
     if os.name == 'nt':
         return ffmpeg.replace("ffmpeg.exe", "ffprobe.exe").replace("ffmpeg", "ffprobe.exe")
     return ffmpeg.replace("ffmpeg", "ffprobe")
 
 
-# ── Helper: Duration from ffprobe ───────────────────────────────────────
 def _get_audio_duration(path):
-    """Get audio file duration in seconds via ffprobe."""
     ffprobe = _get_ffprobe()
     startupinfo = None
     if os.name == 'nt':
@@ -96,12 +97,43 @@ def _get_audio_duration(path):
             return float(json.loads(r.stdout)["format"]["duration"])
     except Exception:
         pass
-    return 3.0  # fallback
+    return 3.0
 
 
-# ── Helper: Build chapter timestamps description ────────────────────────
-def _build_chapter_timestamps(chapters: list, chapter_durations: list[float]):
-    """Build YouTube chapter timestamp lines."""
+def _detect_nvenc(ffmpeg):
+    """Check if CUDA NVENC is available."""
+    try:
+        startupinfo = None
+        if os.name == 'nt':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        r = subprocess.run([ffmpeg, "-encoders"], capture_output=True, text=True,
+                          timeout=5, startupinfo=startupinfo)
+        return "h264_nvenc" in r.stdout
+    except Exception:
+        return False
+
+
+def _get_nvenc_preset(ffmpeg):
+    """Check available NVENC presets and return the fastest one (p1)."""
+    try:
+        startupinfo = None
+        if os.name == 'nt':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        r = subprocess.run([ffmpeg, "-hide_banner", "-f", "lavfi", "-i",
+                           "nullsrc=s=1280x720", "-c:v", "h264_nvenc", "-preset", "p1",
+                           "-f", "null", "-"], capture_output=True, text=True,
+                          timeout=5, startupinfo=startupinfo)
+        if r.returncode == 0:
+            return "p1"
+    except Exception:
+        pass
+    # Fallback presets supported by all NVENC versions
+    return "fast"
+
+
+def _build_chapter_timestamps(chapters, chapter_durations):
     lines = ["\n\n--- CHAPTERS ---"]
     elapsed = 0.0
     for i, (ch, dur) in enumerate(zip(chapters, chapter_durations)):
@@ -112,31 +144,22 @@ def _build_chapter_timestamps(chapters: list, chapter_durations: list[float]):
     return "\n".join(lines)
 
 
-# ── Helper: Generate SRT subtitles for a chapter ────────────────────────
-def _generate_chapter_srt(chapter_idx: int, text: str, start_ms: float, duration_ms: float) -> str:
-    """Generate a single SRT subtitle entry for the chapter's full text."""
+def _generate_chapter_srt(chapter_idx, text, start_ms, duration_ms):
     words = text.split()
     if not words:
         return ""
-
     total_chars = sum(len(w) for w in words)
     sec_per_char = (duration_ms / 1000.0) / total_chars if total_chars > 0 else 0.05
-
     lines = []
     entry_num = chapter_idx + 1
-    # Show the chapter title for 2 seconds at the start
     title_entry_start = start_ms
     title_entry_end = title_entry_start + min(2000, duration_ms * 0.15)
-
     lines.append(f"{entry_num}")
     lines.append(f"{_ms_to_srt_time(title_entry_start)} --> {_ms_to_srt_time(title_entry_end)}")
     lines.append(f"[ {chapter_idx + 1}. {text[:80].strip()}... ]")
     lines.append("")
-
-    # Split remaining text into subtitle chunks (max 5 words per subtitle)
     chunk_size = 5
     word_groups = [words[i:i + chunk_size] for i in range(0, len(words), chunk_size)]
-    char_offset = 0
     current_ms = title_entry_end
     for gi, group in enumerate(word_groups):
         group_chars = sum(len(w) for w in group)
@@ -149,12 +172,10 @@ def _generate_chapter_srt(chapter_idx: int, text: str, start_ms: float, duration
         lines.append(group_text)
         lines.append("")
         current_ms = end_ms
-
     return "\n".join(lines)
 
 
-def _ms_to_srt_time(ms: float) -> str:
-    """Convert milliseconds to SRT time format HH:MM:SS,mmm."""
+def _ms_to_srt_time(ms):
     total_sec = ms / 1000.0
     hours = int(total_sec // 3600)
     minutes = int((total_sec % 3600) // 60)
@@ -163,12 +184,43 @@ def _ms_to_srt_time(ms: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
 
 
+def _render_segment(ffmpeg, codec, nvenc_preset, card_path, audio_path,
+                    output_path, duration, startupinfo, timeout=180):
+    """
+    Render a single video segment: static image + audio.
+    Uses simple -loop 1 (no zoompan filters) for max speed.
+    """
+    cmd = [
+        ffmpeg, "-y",
+        "-loop", "1", "-i", card_path,
+        "-i", audio_path,
+        "-c:v", codec,
+    ]
+    if codec == "h264_nvenc":
+        cmd += ["-preset", nvenc_preset, "-cq", "23", "-b:v", "5M",
+                "-bufsize", "10M", "-rc", "vbr"]
+    else:
+        cmd += ["-preset", "veryfast", "-crf", "26"]
+    cmd += [
+        "-c:a", "aac", "-b:a", "128k",
+        "-t", str(duration),
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        output_path
+    ]
+    subprocess.run(cmd, startupinfo=startupinfo,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                   timeout=timeout)
+    return output_path
+
+
 # ── Main Pipeline ─────────────────────────────────────────────────────────
 def run_long_pipeline():
-    """Executes the complete 10-minute long-form video pipeline."""
     print("=" * 80)
     print("   THE DAILY AUDIT — LONG-FORM VIDEO PIPELINE (10 MIN)")
     print("=" * 80)
+
+    pipeline_start = time.time()
 
     # 0. Initialize systems
     timestamp = str(int(time.time()))
@@ -188,7 +240,6 @@ def run_long_pipeline():
     st = STYLE_PRESETS.get(style, STYLE_PRESETS["blueprint"])
 
     # ── STEP 1: Select Topic ─────────────────────────────────────────────
-    # Try to fetch a myth topic first (deep enough for 10 min)
     topic = None
     category = None
     try:
@@ -197,7 +248,7 @@ def run_long_pipeline():
         )
         print(f"[main_long] Selected Myth Topic: '{topic}' | Category: {category}")
     except Exception as e:
-        print(f"[main_long] No myth topic available ({e}). Trying bizarre topic...")
+        print(f"[main_long] No myth topic ({e}). Trying bizarre topic...")
         try:
             topic, category, description = ingestion.fetch_unused_bizarre_topic(
                 gemini_client=client_ref, category_filter=None,
@@ -207,10 +258,10 @@ def run_long_pipeline():
             print(f"[main_long] CRITICAL: No topics available: {e2}")
             sys.exit(1)
 
-    # Reserve topic so it's not picked by Shorts pipeline
     ingestion.log_uploaded_topic(topic, "")
 
     # ── STEP 2: Gemini 2.5 Pro Deep Research + Script Generation ─────────
+    t2_start = time.time()
     print(f"\n{'=' * 80}")
     print(f"   STEP 2: GENERATING LONG-FORM SCRIPT — '{topic}'")
     print(f"{'=' * 80}")
@@ -223,9 +274,10 @@ def run_long_pipeline():
 
     chapters = script.chapters
     num_chapters = len(chapters)
-    print(f"[main_long] Script generated: {num_chapters} chapters, climax ready.")
+    print(f"[main_long] Script generated: {num_chapters} chapters ({(time.time()-t2_start):.1f}s)")
 
-    # ── STEP 3: Generate TTS Audio Per Chapter ───────────────────────────
+    # ── STEP 3: Generate TTS Audio Per Chapter (parallel) ────────────────
+    t3_start = time.time()
     print(f"\n{'=' * 80}")
     print(f"   STEP 3: GENERATING TTS AUDIO ({num_chapters} CHAPTERS)")
     print(f"{'=' * 80}")
@@ -249,26 +301,29 @@ def run_long_pipeline():
         print(f"[main_long] WARNING: Intro TTS failed: {e}")
         intro_audio = None
 
-    # Chapter TTS
-    chapter_audios = []
-    for i, ch in enumerate(chapters):
+    # Chapter TTS — parallel
+    def _gen_chapter_tts(i, ch):
         try:
-            # Use per-scene prosody similar to main.py (subtle variation)
             rate = 0.97 if i < num_chapters // 3 else (0.95 if i < num_chapters * 2 // 3 else 0.93)
             pitch = "0st" if i < num_chapters * 2 // 3 else "-0.5st"
             ssml = f"<prosody pitch='{pitch}' rate='{rate}'>{ch.content}</prosody>"
-            path = asset_gen.generate_tts_audio(
-                ssml, f"long_ch{i}_{timestamp}", is_ssml=True
-            )
-            chapter_audios.append(path)
-            print(f"[main_long] Ch.{i+1} '{ch.title}': TTS generated ({len(ch.content.split())} words)")
+            path = asset_gen.generate_tts_audio(ssml, f"long_ch{i}_{timestamp}", is_ssml=True)
+            return (i, path)
         except Exception as e:
-            print(f"[main_long] WARNING: Ch.{i+1} TTS failed: {e}. Generating silent placeholder...")
+            print(f"[main_long] WARNING: Ch.{i+1} TTS failed: {e}")
             silent = asset_gen._generate_silent_placeholder(
                 os.path.join(asset_gen.assets_dir, f"long_ch{i}_{timestamp}.mp3"),
                 duration_ms=max(3000, len(ch.content) * 60)
             )
-            chapter_audios.append(silent)
+            return (i, silent)
+
+    chapter_audios = [None] * num_chapters
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        futures = [pool.submit(_gen_chapter_tts, i, ch) for i, ch in enumerate(chapters)]
+        for f in concurrent.futures.as_completed(futures):
+            idx, path = f.result()
+            chapter_audios[idx] = path
+            print(f"[main_long] Ch.{idx+1} '{chapters[idx].title}': TTS ready ({len(chapters[idx].content.split())} words)")
 
     # Outro TTS
     outro_text = random.choice(OUTRO_TEXTS)
@@ -284,97 +339,132 @@ def run_long_pipeline():
         print(f"[main_long] WARNING: Outro TTS failed: {e}")
         outro_audio = None
 
-    # ── STEP 4: Fetch Images Per Chapter ─────────────────────────────────
+    print(f"[main_long] TTS phase: {(time.time()-t3_start):.1f}s")
+
+    # ── STEP 4: Fetch Images Per Chapter (parallel) ──────────────────────
+    t4_start = time.time()
     print(f"\n{'=' * 80}")
     print(f"   STEP 4: FETCHING IMAGES ({num_chapters} CHAPTERS)")
     print(f"{'=' * 80}")
 
     scraper = DataScraper()
-    chapter_images = []
+    chapter_images = [None] * num_chapters
 
-    for i, ch in enumerate(chapters):
-        img_path = None
-        queries = [ch.visual_query, topic]
-
-        for query in queries:
+    def _fetch_chapter_image(i, ch):
+        for query in [ch.visual_query, topic]:
             if not query:
                 continue
             try:
-                # Try Wikipedia first
-                img_path = scraper.fetch_image_multi_source(
-                    query, f"long_ch{i}_img_{timestamp}"
-                )
+                img_path = scraper.fetch_image_multi_source(query, f"long_ch{i}_img_{timestamp}")
                 if img_path and os.path.exists(img_path):
-                    print(f"[main_long] Ch.{i+1}: Wikipedia image found: '{query}'")
-                    break
+                    print(f"[main_long] Ch.{i+1}: Wikipedia image: '{query}'")
+                    return (i, img_path)
             except Exception:
-                img_path = None
+                pass
+        return (i, None)
 
-        # Fallback: generate with Imagen
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        futures = [pool.submit(_fetch_chapter_image, i, ch) for i, ch in enumerate(chapters)]
+        for f in concurrent.futures.as_completed(futures):
+            idx, path = f.result()
+            chapter_images[idx] = path
+
+    # Imagen fallback for any missing images
+    for i, img_path in enumerate(chapter_images):
         if not img_path or not os.path.exists(img_path):
             try:
-                safe_suffix = " No human faces, no political content, no violence, no text, safe for all ages."
-                img_path = asset_gen.generate_background_image(
-                    f"Educational illustration of {ch.title}, {topic}. {safe_suffix}",
+                safe = " No human faces, no political content, no violence, no text, safe for all ages."
+                chapter_images[i] = asset_gen.generate_background_image(
+                    f"Educational illustration of {chapters[i].title}, {topic}. {safe}",
                     f"long_ch{i}_fallback_{timestamp}",
-                    aspect_ratio="16:9",
-                    is_blueprint=True,
+                    aspect_ratio="16:9", is_blueprint=True,
                     style_suffix=st["bg_prompt_suffix"]
                 )
                 print(f"[main_long] Ch.{i+1}: Imagen fallback generated")
-            except Exception as img_err:
-                print(f"[main_long] WARNING: Ch.{i+1} image failed: {img_err}")
-                img_path = None
+            except Exception:
+                chapter_images[i] = None
 
-        chapter_images.append(img_path)
+    print(f"[main_long] Images phase: {(time.time()-t4_start):.1f}s")
 
-    # ── STEP 5: Generate Visual Cards (using VideoEngine) ────────────────
+    # ── STEP 5: Generate Visual Cards ────────────────────────────────────
+    t5_start = time.time()
     print(f"\n{'=' * 80}")
     print(f"   STEP 5: GENERATING CHAPTER CARDS")
     print(f"{'=' * 80}")
 
     video_engine = VideoEngine()
-    chapter_cards = []
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
+    # Pre-load fonts
+    try:
+        font_large = ImageFont.truetype(video_engine.font_path, 72)
+        font_med = ImageFont.truetype(video_engine.font_path, 48)
+        font_small = ImageFont.truetype(video_engine.font_path, 28)
+        font_ch = ImageFont.truetype(video_engine.font_path, 42)
+        font_tk = ImageFont.truetype(video_engine.font_path, 28)
+    except Exception:
+        default_font = ImageFont.load_default()
+        font_large = font_med = font_small = font_ch = font_tk = default_font
+
+    # Generate chapter cards (sequential — fast PIL operations)
+    chapter_cards = [None] * num_chapters
     for i, ch in enumerate(chapters):
         img_path = chapter_images[i]
-        if not img_path or not os.path.exists(img_path):
-            # Use the first available image
-            fallback = next((p for p in chapter_images if p and os.path.exists(p)), None)
-            if fallback:
-                img_path = fallback
-            else:
-                img_path = chapter_images[i]  # keep None
+        if img_path and os.path.exists(img_path):
+            try:
+                label = f"CHAPTER {i+1}: {ch.title.upper()}"
+                card = video_engine._generate_card(
+                    image_path=img_path, label_text=label,
+                    status_text=f"EXHIBIT {chr(65+i)}",
+                    is_truth=(i >= num_chapters // 2),
+                    style_dict=st, topic=topic,
+                    add_redactions=(i == 0), card_text=ch.key_takeaway,
+                )
+                chapter_cards[i] = card
+            except Exception:
+                chapter_cards[i] = None
 
-        try:
-            label_letter = chr(65 + i)  # A, B, C...
-            card = video_engine._generate_card(
-                image_path=img_path,
-                label_text=f"CHAPTER {i+1}: {ch.title.upper()}",
-                status_text=f"EXHIBIT {label_letter}",
-                is_truth=(i >= num_chapters // 2),
-                style_dict=st,
-                topic=topic,
-                add_redactions=(i == 0),
-                card_text=ch.key_takeaway,
-            )
-            chapter_cards.append(card)
-            print(f"[main_long] Ch.{i+1} card generated: {ch.title}")
-        except Exception as e:
-            print(f"[main_long] WARNING: Ch.{i+1} card failed: {e}")
-            chapter_cards.append(None)
+        # Render card to 16:9 canvas regardless
+        card_img = chapter_cards[i]
+        canvas = Image.new("RGB", (WIDTH, HEIGHT), (10, 15, 30))
+        if card_img is not None:
+            card_resized = card_img.resize((540, 620), Image.Resampling.LANCZOS)
+            cx, cy = (WIDTH - 540) // 2, (HEIGHT - 620) // 2
+            if card_resized.mode == 'RGBA':
+                canvas.paste(card_resized, (cx, cy), card_resized)
+            else:
+                canvas.paste(card_resized, (cx, cy))
+            # Chapter title at top
+            ch_label = f"CHAPTER {i+1}: {ch.title}"
+            ch_draw = ImageDraw.Draw(canvas)
+            ct_w = ch_draw.textlength(ch_label, font=font_ch)
+            ch_draw.text(((WIDTH - ct_w) // 2, 30), ch_label, fill=(0, 242, 254), font=font_ch)
+            # Takeaway at bottom
+            tk_label = f"▸ {ch.key_takeaway}"
+            ch_draw.text((60, HEIGHT - 100), tk_label, fill=(200, 200, 200), font=font_tk)
+        else:
+            fb_draw = ImageDraw.Draw(canvas)
+            ch_label = f"CHAPTER {i+1}: {ch.title}"
+            fb_draw.text((100, HEIGHT // 2 - 50), ch_label, fill=(255, 255, 255), font=font_large)
+        chapter_cards[i] = canvas
+
+    print(f"[main_long] Cards phase: {(time.time()-t5_start):.1f}s")
 
     # Generate Static mascot for intro/outro
     static_mascot = video_engine._render_static(size=200, expression="neutral")
-    static_path = os.path.join(video_engine.assets_dir, f"static_mascot_long_{timestamp}.png")
-    static_mascot.save(static_path)
 
-    # ── STEP 6: Compose Video with FFmpeg ────────────────────────────────
+    # ── STEP 6: Compose Video (PARALLEL, GPU-ACCELERATED) ────────────────
+    t6_start = time.time()
     print(f"\n{'=' * 80}")
-    print(f"   STEP 6: COMPOSING VIDEO ({num_chapters} CHAPTERS, 16:9)")
+    print(f"   STEP 6: COMPOSING VIDEO (parallel GPU encoding)")
     print(f"{'=' * 80}")
 
     ffmpeg = _get_ffmpeg()
+    has_nvenc = _detect_nvenc(ffmpeg)
+    codec = "h264_nvenc" if has_nvenc else "libx264"
+    nvenc_preset = _get_nvenc_preset(ffmpeg) if has_nvenc else "veryfast"
+    print(f"[main_long] Encoder: {codec}" + (f" (NVENC preset={nvenc_preset})" if has_nvenc else ""))
+
     assets_dir = video_engine.assets_dir
     output_dir = os.path.join(assets_dir, "long_form")
     os.makedirs(output_dir, exist_ok=True)
@@ -384,141 +474,29 @@ def run_long_pipeline():
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-    # ── 6a. Build per-chapter video segments ────────────────────────────
-    chapter_video_paths = []
-    chapter_real_durations = []
+    card_paths = []
+    for i, canvas in enumerate(chapter_cards):
+        path = os.path.join(assets_dir, f"long_ch{i}_canvas_{timestamp}.png")
+        canvas.save(path)
+        card_paths.append(path)
 
-    # Get intro audio duration
-    intro_dur = _get_audio_duration(intro_audio) if intro_audio else 4.0
-    intro_segment = os.path.join(output_dir, f"segment_intro_{timestamp}.mp4")
-    chapter_real_durations.append(intro_dur)
-
-    # Create a simple intro: dark background + text overlay + static mascot
-    # We'll use a card-style intro with the channel name
+    # Intro card
     intro_card_path = os.path.join(assets_dir, f"long_intro_card_{timestamp}.png")
-    from PIL import Image, ImageDraw, ImageFont, ImageFilter
     intro_card = Image.new("RGB", (WIDTH, HEIGHT), (10, 15, 30))
     draw = ImageDraw.Draw(intro_card)
-    try:
-        font_large = ImageFont.truetype(video_engine.font_path, 72)
-        font_med = ImageFont.truetype(video_engine.font_path, 48)
-        font_small = ImageFont.truetype(video_engine.font_path, 36)
-    except Exception:
-        font_large = ImageFont.load_default()
-        font_med = font_large
-        font_small = font_large
-
-    # Draw intro card
-    title_text = "THE DAILY AUDIT"
-    subtitle_text = f"DEEP DIVE: {topic.upper()}"
-    t_w = draw.textlength(title_text, font=font_large)
-    draw.text(((WIDTH - t_w) // 2, HEIGHT // 3), title_text, fill=(255, 242, 0), font=font_large)
-    t_w2 = draw.textlength(subtitle_text, font=font_med)
-    draw.text(((WIDTH - t_w2) // 2, HEIGHT // 3 + 100), subtitle_text, fill=(0, 242, 254), font=font_med)
+    t_w = draw.textlength("THE DAILY AUDIT", font=font_large)
+    draw.text(((WIDTH - t_w) // 2, HEIGHT // 3), "THE DAILY AUDIT", fill=(255, 242, 0), font=font_large)
+    subtitle = f"DEEP DIVE: {topic.upper()}"
+    t_w2 = draw.textlength(subtitle, font=font_med)
+    draw.text(((WIDTH - t_w2) // 2, HEIGHT // 3 + 100), subtitle, fill=(0, 242, 254), font=font_med)
     draw.text((WIDTH // 2 - 200, HEIGHT // 2 + 50), "═══════════════════", fill=(100, 100, 160), font=font_small)
     draw.text((WIDTH // 2 - 200, HEIGHT // 2 + 100), "A Daily Audit Production", fill=(150, 150, 200), font=font_small)
-
-    # Paste Static mascot on the right side
     mascot_resized = static_mascot.resize((300, 300), Image.Resampling.LANCZOS)
-    intro_card.paste(mascot_resized, (WIDTH - 380, 50), mascot_resized if mascot_resized.mode == 'RGBA' else None)
+    intro_card.paste(mascot_resized, (WIDTH - 380, 50),
+                     mascot_resized if mascot_resized.mode == 'RGBA' else None)
     intro_card.save(intro_card_path)
 
-    # Encode intro segment
-    intro_filter = (
-        f"[0:v]zoompan=z=1.005:d={int(intro_dur * FPS)}:s={WIDTH}x{HEIGHT},fps={FPS}[v]"
-    )
-    subprocess.run(
-        [ffmpeg, "-y", "-loop", "1", "-i", intro_card_path,
-         "-i", intro_audio,
-         "-filter_complex", intro_filter,
-         "-map", "[v]", "-map", "1:a",
-         "-c:v", "libx264", "-preset", "medium", "-crf", "23",
-         "-c:a", "aac", "-b:a", "128k",
-         "-t", str(intro_dur),
-         "-pix_fmt", "yuv420p",
-         intro_segment],
-        startupinfo=startupinfo,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        timeout=120
-    )
-    chapter_video_paths.append(intro_segment)
-    print(f"[main_long] Intro segment rendered ({intro_dur:.1f}s)")
-
-    # ── 6b. Render each chapter as a separate segment ───────────────────
-    for i, ch in enumerate(chapters):
-        card_img = chapter_cards[i]
-        if card_img is None:
-            # Fallback: create a simple text-based card
-            fallback_card = Image.new("RGB", (WIDTH, HEIGHT), (10, 15, 30))
-            fb_draw = ImageDraw.Draw(fallback_card)
-            fb_draw.text((100, HEIGHT // 2 - 50), f"CHAPTER {i+1}: {ch.title}", fill=(255, 255, 255), font=font_large)
-            fcard_path = os.path.join(assets_dir, f"long_ch{i}_fallback_card_{timestamp}.png")
-            fallback_card.save(fcard_path)
-            card_path = fcard_path
-        else:
-            # Card is RGBA PIL image — paste on dark background
-            canvas = Image.new("RGB", (WIDTH, HEIGHT), (10, 15, 30))
-            # Scale card to fit — cards are portrait (840x890), center in landscape
-            card_resized = card_img.resize((540, 620), Image.Resampling.LANCZOS)
-            cx = (WIDTH - 540) // 2
-            cy = (HEIGHT - 620) // 2
-            if card_resized.mode == 'RGBA':
-                canvas.paste(card_resized, (cx, cy), card_resized)
-            else:
-                canvas.paste(card_resized, (cx, cy))
-
-            # Add chapter title overlay at top
-            try:
-                ch_font = ImageFont.truetype(video_engine.font_path, 42)
-            except Exception:
-                ch_font = ImageFont.load_default()
-            ch_draw = ImageDraw.Draw(canvas)
-            ch_label = f"CHAPTER {i+1}: {ch.title}"
-            ct_w = ch_draw.textlength(ch_label, font=ch_font)
-            ch_draw.text(((WIDTH - ct_w) // 2, 30), ch_label, fill=(0, 242, 254), font=ch_font)
-
-            # Add takeaway at the bottom
-            try:
-                tk_font = ImageFont.truetype(video_engine.font_path, 28)
-            except Exception:
-                tk_font = ImageFont.load_default()
-            tk_label = f"▸ {ch.key_takeaway}"
-            ch_draw.text((60, HEIGHT - 100), tk_label, fill=(200, 200, 200), font=tk_font)
-
-            card_path = os.path.join(assets_dir, f"long_ch{i}_canvas_{timestamp}.png")
-            canvas.save(card_path)
-
-        # Get audio duration
-        audio_dur = _get_audio_duration(chapter_audios[i])
-        chapter_real_durations.append(audio_dur)
-
-        # Ken Burns slow zoom effect
-        ch_segment = os.path.join(output_dir, f"segment_ch{i}_{timestamp}.mp4")
-        ch_filter = (
-            f"[0:v]zoompan=z='if(lte(zoom,1.0),1.0,zoom+0.002)':"
-            f"d={int(audio_dur * FPS)}:s={WIDTH}x{HEIGHT}:fps={FPS}[v]"
-        )
-        subprocess.run(
-            [ffmpeg, "-y", "-loop", "1", "-i", card_path,
-             "-i", chapter_audios[i],
-             "-filter_complex", ch_filter,
-             "-map", "[v]", "-map", "1:a",
-             "-c:v", "libx264", "-preset", "medium", "-crf", "23",
-             "-c:a", "aac", "-b:a", "128k",
-             "-t", str(audio_dur),
-             "-pix_fmt", "yuv420p",
-             ch_segment],
-            startupinfo=startupinfo,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            timeout=300
-        )
-        chapter_video_paths.append(ch_segment)
-        print(f"[main_long] Ch.{i+1} '{ch.title}' rendered ({audio_dur:.1f}s)")
-
-    # ── 6c. Render outro segment ────────────────────────────────────────
-    outro_dur = _get_audio_duration(outro_audio) if outro_audio else 8.0
-    chapter_real_durations.append(outro_dur)
-
+    # Outro card
     outro_card_path = os.path.join(assets_dir, f"long_outro_card_{timestamp}.png")
     outro_card = Image.new("RGB", (WIDTH, HEIGHT), (10, 15, 30))
     outro_draw = ImageDraw.Draw(outro_card)
@@ -526,177 +504,139 @@ def run_long_pipeline():
                     "THANK YOU", fill=(255, 242, 0), font=font_large)
     outro_draw.text(((WIDTH - draw.textlength("Subscribe for the next deep dive.", font=font_med)) // 2, HEIGHT // 3 + 100),
                     "Subscribe for the next deep dive.", fill=(0, 242, 254), font=font_med)
-    try:
-        small_font = ImageFont.truetype(video_engine.font_path, 28)
-    except Exception:
-        small_font = ImageFont.load_default()
-    outro_draw.text((60, HEIGHT - 80), "#TheDailyAudit", fill=(150, 150, 200), font=small_font)
-    # Static mascot in outro (winking)
+    outro_draw.text((60, HEIGHT - 80), "#TheDailyAudit", fill=(150, 150, 200), font=font_small)
     static_wink = video_engine._render_static(size=180, expression="wink")
-    outro_card.paste(static_wink, (WIDTH - 250, HEIGHT // 3 - 50), static_wink if static_wink.mode == 'RGBA' else None)
+    outro_card.paste(static_wink, (WIDTH - 250, HEIGHT // 3 - 50),
+                     static_wink if static_wink.mode == 'RGBA' else None)
     outro_card.save(outro_card_path)
 
-    outro_segment = os.path.join(output_dir, f"segment_outro_{timestamp}.mp4")
-    outro_filter = (
-        f"[0:v]zoompan=z=1.003:d={int(outro_dur * FPS)}:s={WIDTH}x{HEIGHT},fps={FPS}[v]"
-    )
-    subprocess.run(
-        [ffmpeg, "-y", "-loop", "1", "-i", outro_card_path,
-         "-i", outro_audio,
-         "-filter_complex", outro_filter,
-         "-map", "[v]", "-map", "1:a",
-         "-c:v", "libx264", "-preset", "medium", "-crf", "23",
-         "-c:a", "aac", "-b:a", "128k",
-         "-t", str(outro_dur),
-         "-pix_fmt", "yuv420p",
-         outro_segment],
-        startupinfo=startupinfo,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        timeout=120
-    )
-    chapter_video_paths.append(outro_segment)
-    print(f"[main_long] Outro segment rendered ({outro_dur:.1f}s)")
+    # Get durations for all segments
+    intro_dur = _get_audio_duration(intro_audio) if intro_audio else 4.0
+    audio_durs = [_get_audio_duration(a) for a in chapter_audios]
+    outro_dur = _get_audio_duration(outro_audio) if outro_audio else 8.0
 
-    # ── 6d. Concatenate all segments ────────────────────────────────────
-    concat_list_path = os.path.join(output_dir, f"concat_list_{timestamp}.txt")
-    with open(concat_list_path, "w") as f:
-        for seg_path in chapter_video_paths:
-            # Use forward slashes for FFmpeg concat
-            f.write(f"file '{seg_path.replace(os.sep, '/')}'\n")
+    # RENDER ALL SEGMENTS IN PARALLEL
+    segment_tasks = []
+
+    # Intro
+    seg_intro = os.path.join(output_dir, f"seg_intro_{timestamp}.mp4")
+    segment_tasks.append((ffmpeg, codec, nvenc_preset, intro_card_path,
+                          intro_audio, seg_intro, intro_dur, startupinfo))
+
+    # Chapters
+    for i in range(num_chapters):
+        seg = os.path.join(output_dir, f"seg_ch{i}_{timestamp}.mp4")
+        segment_tasks.append((ffmpeg, codec, nvenc_preset, card_paths[i],
+                              chapter_audios[i], seg, audio_durs[i], startupinfo))
+
+    # Outro
+    seg_outro = os.path.join(output_dir, f"seg_outro_{timestamp}.mp4")
+    segment_tasks.append((ffmpeg, codec, nvenc_preset, outro_card_path,
+                          outro_audio, seg_outro, outro_dur, startupinfo))
+
+    seg_paths = [None] * len(segment_tasks)
+    print(f"[main_long] Rendering {len(segment_tasks)} segments in parallel (GPU)...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        future_map = {}
+        for idx, task in enumerate(segment_tasks):
+            f = pool.submit(_render_segment, *task)
+            future_map[f] = idx
+        for f in concurrent.futures.as_completed(future_map):
+            idx = future_map[f]
+            seg_paths[idx] = f.result()
+            name = "intro" if idx == 0 else ("outro" if idx == len(segment_tasks) - 1 else f"ch.{idx}")
+            print(f"[main_long]   {name} rendered ✓")
+
+    # CONCATENATE
+    print(f"[main_long] Concatenating {len(seg_paths)} segments...")
+    concat_list = os.path.join(output_dir, f"concat_{timestamp}.txt")
+    with open(concat_list, "w") as f:
+        for sp in seg_paths:
+            f.write(f"file '{sp.replace(os.sep, '/')}'\n")
 
     output_name = f"daily_audit_long_{timestamp}"
     output_video_path = os.path.join(output_dir, f"{output_name}.mp4")
 
-    print(f"[main_long] Concatenating {len(chapter_video_paths)} segments...")
     subprocess.run(
-        [ffmpeg, "-y", "-f", "concat", "-safe", "0",
-         "-i", concat_list_path,
-         "-c", "copy",
-         "-movflags", "+faststart",
-         output_video_path],
-        startupinfo=startupinfo,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        timeout=300
+        [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", concat_list,
+         "-c", "copy", "-movflags", "+faststart", output_video_path],
+        startupinfo=startupinfo, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300
     )
-    print(f"[main_long] Video composition complete: {output_video_path}")
+    print(f"[main_long] Composition: {(time.time()-t6_start):.1f}s total")
 
-    # ── STEP 7: Generate SRT Subtitles ──────────────────────────────────
-    print(f"\n{'=' * 80}")
-    print(f"   STEP 7: GENERATING SRT SUBTITLES")
-    print(f"{'=' * 80}")
-
+    # ── STEP 7: SRT Subtitles ────────────────────────────────────────────
     srt_lines = []
-    current_ms = intro_dur * 1000  # Start after intro
-
+    current_ms = intro_dur * 1000
     for i, ch in enumerate(chapters):
-        dur_ms = chapter_real_durations[i + 1] * 1000  # +1 because i=0 is intro
-        chapter_srt = _generate_chapter_srt(i, ch.content, current_ms, dur_ms)
-        srt_lines.append(chapter_srt)
+        dur_ms = audio_durs[i] * 1000
+        srt_lines.append(_generate_chapter_srt(i, ch.content, current_ms, dur_ms))
         current_ms += dur_ms
 
     srt_path = os.path.join(output_dir, f"{output_name}.srt")
     with open(srt_path, "w", encoding="utf-8") as f:
         f.write("\n".join(srt_lines))
-    print(f"[main_long] SRT subtitles saved: {srt_path}")
+    print(f"[main_long] SRT: {srt_path}")
 
-    # ── STEP 8: Generate Thumbnail ──────────────────────────────────────
-    print(f"\n{'=' * 80}")
-    print(f"   STEP 8: GENERATING THUMBNAIL")
-    print(f"{'=' * 80}")
-
+    # ── STEP 8: Thumbnail ────────────────────────────────────────────────
     thumb_path = os.path.join(output_dir, f"{output_name}_thumb.png")
     try:
-        # First chapter image as background
         thumb_bg = Image.new("RGB", (1920, 1080), (10, 15, 30))
         if chapter_images[0] and os.path.exists(chapter_images[0]):
-            bg_img = Image.open(chapter_images[0]).convert("RGB")
-            bg_img = bg_img.resize((1920, 1080), Image.Resampling.LANCZOS)
-            bg_img = bg_img.filter(ImageFilter.GaussianBlur(radius=8))
-            dark_overlay = Image.new("RGB", (1920, 1080), (10, 15, 30))
-            bg_img = Image.blend(bg_img, dark_overlay, 0.5)
-            thumb_bg.paste(bg_img, (0, 0))
-        thumb_draw = ImageDraw.Draw(thumb_bg)
-        try:
-            title_font = ImageFont.truetype(video_engine.font_path, 64)
-            sub_font = ImageFont.truetype(video_engine.font_path, 40)
-        except Exception:
-            title_font = ImageFont.load_default()
-            sub_font = title_font
-        thumb_draw.text((100, 100), "THE DAILY AUDIT", fill=(255, 242, 0), font=title_font)
-        thumb_draw.text((100, 200), topic.upper(), fill=(255, 255, 255), font=sub_font)
-        thumb_draw.text((100, 270), "A 10-Minute Deep Dive", fill=(0, 242, 254), font=sub_font)
-        # Static mascot
-        static_thumb = video_engine._render_static(size=350, expression="shocked")
-        thumb_bg.paste(static_thumb, (1500, 350), static_thumb if static_thumb.mode == 'RGBA' else None)
+            bg = Image.open(chapter_images[0]).convert("RGB").resize((1920, 1080), Image.Resampling.LANCZOS)
+            bg = bg.filter(ImageFilter.GaussianBlur(radius=8))
+            dark = Image.new("RGB", (1920, 1080), (10, 15, 30))
+            bg = Image.blend(bg, dark, 0.5)
+            thumb_bg.paste(bg, (0, 0))
+        td = ImageDraw.Draw(thumb_bg)
+        td.text((100, 100), "THE DAILY AUDIT", fill=(255, 242, 0), font=font_large)
+        td.text((100, 200), topic.upper(), fill=(255, 255, 255), font=font_med)
+        td.text((100, 270), "A 10-Minute Deep Dive", fill=(0, 242, 254), font=font_med)
+        st_thumb = video_engine._render_static(size=350, expression="shocked")
+        thumb_bg.paste(st_thumb, (1500, 350), st_thumb if st_thumb.mode == 'RGBA' else None)
         thumb_bg.save(thumb_path)
-        print(f"[main_long] Thumbnail saved: {thumb_path}")
     except Exception as e:
-        print(f"[main_long] WARNING: Thumbnail generation failed: {e}")
+        print(f"[main_long] Thumbnail failed: {e}")
         thumb_path = None
 
-    # ── STEP 9: Build YouTube Description with Chapters ─────────────────
-    print(f"\n{'=' * 80}")
-    print(f"   STEP 9: PREPARING METADATA")
-    print(f"{'=' * 80}")
-
-    # Calculate real chapter durations (excluding intro/outro)
-    chapter_times = chapter_real_durations[1:-1]  # skip intro & outro
+    # ── STEP 9: Metadata ─────────────────────────────────────────────────
+    chapter_times = audio_durs  # content chapters only, no intro/outro
     chapter_timestamps = _build_chapter_timestamps(chapters, chapter_times)
-
     tags_str = " ".join([f"#{t.strip().replace(' ', '')}" for t in script.tags if t.strip()])
     yt_title = script.youtube_title
-    yt_desc = (
-        f"{script.youtube_description}\n\n"
-        f"───\n"
-        f"{chapter_timestamps}\n\n"
-        f"#TheDailyAudit {tags_str}"
-    )
+    yt_desc = f"{script.youtube_description}\n\n───\n{chapter_timestamps}\n\n#TheDailyAudit {tags_str}"
 
-    print(f"[main_long] YouTube Title: {yt_title}")
-    print(f"[main_long] YouTube Description: {yt_desc[:200]}...")
-
-    # ── STEP 10: Upload as Private Draft ─────────────────────────────────
+    # ── STEP 10: Upload to YouTube (Private Draft) ───────────────────────
     print(f"\n{'=' * 80}")
     print(f"   STEP 10: UPLOADING TO YOUTUBE (PRIVATE DRAFT)")
     print(f"{'=' * 80}")
-
-    yt_success = False
-    yt_video_id = None
+    yt_success, yt_video_id = False, None
     try:
         uploader = YouTubeUploader()
         yt_success, yt_video_id = uploader.upload_short(
-            video_path=output_video_path,
-            title=yt_title,
-            description=yt_desc,
-            tags=script.tags,
-            thumbnail_path=thumb_path,
+            video_path=output_video_path, title=yt_title, description=yt_desc,
+            tags=script.tags, thumbnail_path=thumb_path,
         )
-        if yt_success and yt_video_id:
-            print(f"[main_long] YouTube upload successful! Private draft: https://studio.youtube.com/video/{yt_video_id}/edit")
     except Exception as e:
-        print(f"[main_long] YouTube upload failed (non-fatal): {e}")
+        print(f"[main_long] YouTube upload failed: {e}")
 
-    # ── STEP 11: Upload to Facebook as Draft ────────────────────────────
+    # ── STEP 11: Upload to Facebook (Draft) ──────────────────────────────
     print(f"\n{'=' * 80}")
     print(f"   STEP 11: UPLOADING TO FACEBOOK (DRAFT)")
     print(f"{'=' * 80}")
-
-    fb_success = False
-    fb_video_id = None
+    fb_success, fb_video_id = False, None
     try:
         fb_uploader = FacebookUploader()
         fb_success, fb_video_id = fb_uploader.upload_reel(
             video_path=output_video_path,
             description=f"{script.youtube_description[:200]}\n\n#TheDailyAudit #Education {tags_str}",
         )
-        if fb_success and fb_video_id:
-            print(f"[main_long] Facebook upload successful! Draft video ID: {fb_video_id}")
     except Exception as e:
-        print(f"[main_long] Facebook upload failed (non-fatal): {e}")
+        print(f"[main_long] Facebook upload failed: {e}")
 
-    # ── FINAL SUMMARY ────────────────────────────────────────────────────
-    total_duration = sum(chapter_real_durations)
-    total_words = sum(len(ch.content.split()) for ch in chapters)
+    # ── SUMMARY ──────────────────────────────────────────────────────────
+    total_duration = sum([intro_dur] + audio_durs + [outro_dur])
+    total_words = sum(len(c.content.split()) for c in chapters)
+    pipeline_elapsed = time.time() - pipeline_start
 
     print(f"\n{'=' * 80}")
     print(f"   LONG-FORM PIPELINE COMPLETE")
@@ -704,45 +644,36 @@ def run_long_pipeline():
     print(f"   Topic:              {topic}")
     print(f"   Chapters:           {num_chapters}")
     print(f"   Total Words:        {total_words}")
-    print(f"   Total Duration:     {int(total_duration//60)}:{int(total_duration%60):02d}")
+    print(f"   Video Duration:     {int(total_duration//60)}:{int(total_duration%60):02d}")
+    print(f"   Pipeline Time:      {int(pipeline_elapsed//60)}m {int(pipeline_elapsed%60)}s")
+    print(f"   Encoder:            {codec}")
     print(f"   Video File:         {output_video_path}")
-    print(f"   Thumbnail:          {thumb_path or 'N/A'}")
     print(f"   SRT Subtitles:      {srt_path}")
     print(f"   YouTube Draft:      {'https://studio.youtube.com/video/' + yt_video_id + '/edit' if yt_video_id else 'N/A'}")
     print(f"   Facebook Draft:     {'Video ID: ' + fb_video_id if fb_video_id else 'N/A'}")
-    print(f"   Style:              {style}")
     separator = "=" * 80
     print(separator)
     print("   IMPORTANT: Review the private draft on YouTube Studio before publishing!")
-    print("   YouTube Studio:     https://studio.youtube.com/")
     print(separator)
 
     return {
-        "topic": topic,
-        "category": category,
-        "video_path": output_video_path,
-        "thumbnail_path": thumb_path,
-        "srt_path": srt_path,
-        "yt_video_id": yt_video_id,
-        "fb_video_id": fb_video_id,
-        "total_duration": total_duration,
-        "chapters": num_chapters,
-        "title": yt_title,
+        "topic": topic, "category": category, "video_path": output_video_path,
+        "thumbnail_path": thumb_path, "srt_path": srt_path,
+        "yt_video_id": yt_video_id, "fb_video_id": fb_video_id,
+        "total_duration": total_duration, "chapters": num_chapters, "title": yt_title,
+        "pipeline_time": pipeline_elapsed, "encoder": codec,
     }
 
 
-# ── Entry Point ───────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print("[main_long] Starting The Daily Audit Long-Form Pipeline...")
     try:
         result = run_long_pipeline()
-        print(f"\n[main_long] Pipeline completed successfully.")
-        print(f"[main_long] Video: {result.get('video_path', 'N/A')}")
+        print(f"\n[main_long] Pipeline completed in {result.get('pipeline_time', 0):.0f}s.")
     except KeyboardInterrupt:
-        print("\n[main_long] Pipeline interrupted by user.")
+        print("\n[main_long] Interrupted.")
         sys.exit(1)
     except Exception as e:
-        print(f"\n[main_long] Pipeline failed: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"\n[main_long] Failed: {e}")
+        import traceback; traceback.print_exc()
         sys.exit(1)
