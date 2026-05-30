@@ -143,6 +143,25 @@ STYLE_PRESETS = {
         "watermark_color": (0, 255, 100),
         "timer_bar_color": (0, 255, 100),
     },
+    "evidence": {
+        "bg_prompt_suffix": "Style of a detective case file, cork board with pinned evidence photos, red string connecting clues, warm tungsten lighting.",
+        "card_bg": (50, 40, 30),
+        "card_myth_outline": (200, 40, 40),
+        "card_truth_outline": (40, 180, 80),
+        "card_myth_header_bg": (200, 40, 40),
+        "card_truth_header_bg": (40, 180, 80),
+        "card_myth_header_text": (255, 255, 255),
+        "card_truth_header_text": (255, 255, 255),
+        "myth_label": "EVIDENCE FILE: MISLEADING CLAIM",
+        "truth_label": "EVIDENCE FILE: VERIFIED FACT",
+        "anomaly_label": "EVIDENCE FILE: CLASSIFIED ANOMALY",
+        "subtitle_color": (220, 210, 190),
+        "highlight_bg": (200, 160, 60),
+        "highlight_text": (20, 15, 10),
+        "grid_color": (120, 100, 80, 20),
+        "watermark_color": (200, 40, 40),
+        "timer_bar_color": (200, 160, 60),
+    },
 }
 
 
@@ -170,6 +189,10 @@ class VideoEngine:
         
         # Detect CUDA support once on startup
         self.has_cuda = self._detect_cuda_support()
+
+        # Evidence board mode (case-file / detective style)
+        self.evidence_mode = False
+        self.evidence_captions = []
 
         # Lookahead offset (in ms) to pull subtitles forward so they match the audio timing.
         self.subtitle_lookahead_ms = 200.0
@@ -729,8 +752,8 @@ class VideoEngine:
                 "THE TRUTH",
                 "THE VERDICT"
             ]
-            if image_paths_override and len(image_paths_override) >= 3:
-                image_paths = image_paths_override[:3]
+            if image_paths_override:
+                image_paths = list(image_paths_override)
             else:
                 image_paths = [
                     image_myth_path,
@@ -754,25 +777,42 @@ class VideoEngine:
             starting_text = script_payload.get("starting_text")
             ending_text = script_payload.get("ending_text")
 
-            return self._compile_scene_based_video(
-                image_paths=image_paths,
-                audio_paths=audio_path,
-                scene_texts=scene_texts,
-                scene_labels=scene_labels,
-                scene_titles=scene_titles,
-                output_name=output_name,
-                category=category,
-                style=style,
-                is_bizarre=False,
-                video_type=video_type,
-                mid_roll_word_indices=mid_roll_word_indices,
-                starting_text=starting_text,
-                ending_text=ending_text,
-                topic=script_payload.get("topic"),
-                episode_num=script_payload.get("episode_num")
-            )
+            # Evidence board mode
+            self.evidence_mode = (style == "evidence")
+            if self.evidence_mode:
+                self.evidence_captions = [s[:120] for s in scene_texts if s]
+                print("[VideoEngine] Evidence board mode ACTIVE")
+
+            import traceback
+            try:
+                return self._compile_scene_based_video(
+                    image_paths=image_paths,
+                    audio_paths=audio_path,
+                    scene_texts=scene_texts,
+                    scene_labels=scene_labels,
+                    scene_titles=scene_titles,
+                    output_name=output_name,
+                    category=category,
+                    style=style,
+                    is_bizarre=False,
+                    video_type=video_type,
+                    mid_roll_word_indices=mid_roll_word_indices,
+                    starting_text=starting_text,
+                    ending_text=ending_text,
+                    topic=script_payload.get("topic"),
+                    episode_num=script_payload.get("episode_num")
+                )
+            except Exception as e:
+                print(f"[VideoEngine] _compile_scene_based_video CRASH: {e}")
+                traceback.print_exc()
+                raise
 
         st = STYLE_PRESETS.get(style, STYLE_PRESETS["blueprint"])
+        # Evidence board mode
+        self.evidence_mode = (style == "evidence")
+        if self.evidence_mode:
+            self.evidence_captions = [s[:120] for s in scene_texts if s]
+            print("[VideoEngine] Evidence board mode ACTIVE")
         try:
             from moviepy.editor import ImageClip, AudioFileClip, VideoClip, CompositeAudioClip
         except ImportError:
@@ -1713,7 +1753,7 @@ class VideoEngine:
             # Apply blur + darken to the raw image
             frame_pil = Image.fromarray(base_arr).filter(ImageFilter.GaussianBlur(radius=6))
             dark_overlay = Image.new("RGB", (1080, 1920), (10, 8, 15))
-            frame_pil = Image.blend(frame_pil, dark_overlay, 0.35)
+            frame_pil = Image.blend(frame_pil, dark_overlay, 0.20)
             frame_arr = np.array(frame_pil)
 
             # Scanlines
@@ -2567,9 +2607,9 @@ class VideoEngine:
                         curr_line_words = [w]
                 if curr_line_words:
                     text_area_lines.append(" ".join(curr_line_words))
-                # Cap at 5 lines to prevent excessive card growth
-                if len(text_area_lines) > 5:
-                    text_area_lines = text_area_lines[:4] + ["..."]
+                # Allow up to 8 lines — no "...", let text flow naturally
+                if len(text_area_lines) > 8:
+                    text_area_lines = text_area_lines[:8]
             text_area_h = len(text_area_lines) * text_line_h
             extra_h = text_area_h + text_pad_top + text_pad_bot
 
@@ -2777,9 +2817,9 @@ class VideoEngine:
             line_w = draw.textlength(line, font=font)
             x = (1080 - line_w) // 2
             y = y_pos + (i * line_height)
-            # 4px offset drop shadow (50% opacity black)
-            draw.text((x + 4, y + 4), line, fill=(0, 0, 0, 128), font=font)
-            # 2px black stroke, white text, no background box
+            # 3px offset drop shadow (darker for readability)
+            draw.text((x + 3, y + 3), line, fill=(0, 0, 0, 120), font=font)
+            # 2px black stroke, white text
             draw.text((x, y), line, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
 
     def _render_kinetic_srt_block(self, draw: ImageDraw.Draw, font: ImageFont.FreeTypeFont,
@@ -2917,9 +2957,9 @@ class VideoEngine:
                     draw.text((x_cursor + 3, y_cursor + 3), w_text, fill=(0, 0, 0, 80), font=w_font)
                     draw.text((x_cursor, y_cursor), w_text, fill=accent_color + (255,), font=w_font)
                 else:
-                    # Normal word: white with 2px stroke
-                    draw.text((x_cursor + 2, y_cursor + 2), w_text, fill=(0, 0, 0, 60), font=w_font)
-                    draw.text((x_cursor, y_cursor), w_text, fill=(255, 255, 255), font=w_font, stroke_width=1, stroke_fill=(0, 0, 0))
+                    # Normal word: white with 2px black stroke + drop shadow for readability
+                    draw.text((x_cursor + 3, y_cursor + 3), w_text, fill=(0, 0, 0, 100), font=w_font)
+                    draw.text((x_cursor, y_cursor), w_text, fill=(255, 255, 255), font=w_font, stroke_width=2, stroke_fill=(0, 0, 0))
                 
                 x_cursor += int(w_width) + int(space_width)
             
@@ -2953,6 +2993,32 @@ class VideoEngine:
             if any(w in lower for w in happy_words):
                 beats.append((delay_offset + audio_duration * 0.4, "happy", 1.2))
         return beats
+
+    def _redact_text(self, text: str, redact_ratio: float = 0.4) -> str:
+        """Redact key words from text to build mystery. Replaces ~40% of words with black bars.
+        Preserves first 2-3 words for context, redacts from the middle, keeps last word.
+        Skip redaction if text is too short."""
+        import random, re
+        words = text.split()
+        if len(words) < 6:
+            return text  # too short to redact meaningfully
+        rng = random.Random(hash(text) % 10000)  # deterministic per text
+        # Always keep first 2 and last 1 words visible
+        keep_first = min(3, len(words) // 3)
+        keep_last = 1
+        middle_start = keep_first
+        middle_end = len(words) - keep_last
+        middle_words = list(range(middle_start, middle_end))
+        num_to_redact = max(1, int(len(middle_words) * redact_ratio))
+        redact_indices = set(rng.sample(middle_words, min(num_to_redact, len(middle_words))))
+        result_words = []
+        for i, w in enumerate(words):
+            if i in redact_indices:
+                bar_len = max(3, len(w))
+                result_words.append("\u2588" * bar_len)  # █ full block
+            else:
+                result_words.append(w)
+        return " ".join(result_words)
 
     # ── Sprint B: File Stamp Renderer ────────────────────────────────────
 
@@ -3039,6 +3105,7 @@ class VideoEngine:
         frame_f = frame.astype(np.float32)
         frame_f = frame_f * (1.0 - theme["strength"]) + tint_arr * theme["strength"]
         result = np.clip(frame_f, 0, 255).astype(np.uint8)
+        return result
 
     # ── Color Temperature Tint ─────────────────────────────────────────────
 
@@ -3077,8 +3144,35 @@ class VideoEngine:
             pass
         return clip
 
-    # ── End Color Temperature Tint ────────────────────────────────────────
+    def _create_color_tint_animated(self, size: tuple, duration: float, warm: bool = False, fade_duration: float = 1.5):
+        """
+        Creates a color temperature overlay that FADES IN over fade_duration seconds.
+        warm=True: amber/orange tint (~2800K) for explanation/mechanism scenes
+        warm=False: cool blue tint (~7000K) for truth/reveal scenes — fades in for dramatic effect
+        The alpha starts at 0 and linearly increases to max over fade_duration.
+        Returns a MoviePy VideoClip that can be composited over a scene.
+        """
+        import numpy as np
+        try:
+            from moviepy import VideoClip
+        except ImportError:
+            from moviepy.editor import VideoClip
 
+        w, h = size
+        if warm:
+            r, g, b, max_alpha = 255, 160, 40, 30  # warm amber ~12%
+        else:
+            r, g, b, max_alpha = 40, 120, 255, 35  # cold blue ~14%
+
+        def make_frame(t):
+            if t < fade_duration:
+                alpha = int(max_alpha * (t / fade_duration))
+            else:
+                alpha = max_alpha
+            return np.full((h, w, 4), [r, g, b, alpha], dtype=np.uint8)
+
+        clip = VideoClip(make_frame, duration=duration)
+        return clip
 
     def _create_scene_clip(self, bg_source: Any, card_images: List[Image.Image], audio_duration: float, text: str, delay_offset: float, y_pos: int, scene_idx: int, scene_label: str, scene_title: str, style_dict: dict, audio_clip: Optional[Any] = None, mid_roll_word_indices: Optional[set] = None, is_last_scene: bool = False, audio_path: Optional[str] = None,
                             emotion_beats: Optional[list] = None, stamp_text: Optional[str] = None,
@@ -3225,11 +3319,11 @@ class VideoEngine:
 
             # Scene-specific background parameters
             if scene_idx == 0:
-                base_blur, darken_f = 6.0, 0.50
+                base_blur, darken_f = 6.0, 0.30
             elif scene_idx == 1:
-                base_blur, darken_f = 10.0, 0.60
+                base_blur, darken_f = 8.0, 0.35
             else:
-                base_blur, darken_f = 4.0, 0.40
+                base_blur, darken_f = 4.0, 0.25
 
             if total_dur > 6.0 and cache_key > 5.0:
                 blur_r = max(0.0, base_blur - base_blur * (cache_key - 5.0))
@@ -3285,7 +3379,8 @@ class VideoEngine:
 
             bg_frame_arr = self._apply_category_overlay(bg_frame_arr, category, cache_key)
             _bg_cache[cache_key] = bg_frame_arr
-            return bg_frame_arr.copy()
+            result = bg_frame_arr.copy()
+            return result
 
         # ── PERFORMANCE: Vignette mask cache (computed once per scene) ──
         _vignette_mask = None
@@ -3321,9 +3416,16 @@ class VideoEngine:
                 processed_bg = self._process_bg_frame(raw_frame, blur_radius=blur_r, darken_factor=darken_f)
                 bg_frame_img = Image.fromarray(processed_bg)
             elif _bg_is_static:
-                # Static image — use pre-computed cache
-                bg_frame_arr = _compute_parallax_bg(t, is_last_scene, total_duration, delay_offset, scene_idx, category)
-                bg_frame_img = Image.fromarray(bg_frame_arr)
+                if self.evidence_mode:
+                    # Evidence board: cork / case file texture instead of blurred image
+                    from evidence_board import generate_casefile_background
+                    bg_frame_img = generate_casefile_background(1080, 1920)
+                else:
+                    # Static image — use pre-computed cache
+                    bg_frame_arr = _compute_parallax_bg(t, is_last_scene, total_duration, delay_offset, scene_idx, category)
+                    if bg_frame_arr is None:
+                        bg_frame_arr = np.zeros((1920, 1080, 3), dtype=np.uint8)
+                    bg_frame_img = Image.fromarray(bg_frame_arr)
             else:
                 bg_frame_img = Image.new("RGB", (1080, 1920), (10, 15, 30))
 
@@ -3483,8 +3585,18 @@ class VideoEngine:
                         next_card_image = card_images[current_card_idx + 1]
                 else:
                     active_card_image = card_images[0]
-            
-            if active_card_image is not None:
+
+            if self.evidence_mode and card_images:
+                # ── Evidence Board: polaroid photos on cork board ──
+                from evidence_board import EvidenceBoardCompositor
+                evidence = EvidenceBoardCompositor(1080, 1920)
+                cap = self.evidence_captions or []
+                total_scenes = 3  # default — caller could provide this
+                fused_arr = evidence.apply(
+                    fused_arr, card_images, scene_idx, total_scenes, t, audio_duration,
+                    captions=cap
+                )
+            elif active_card_image is not None:
                 if is_last_scene:
                     # Static card for last scene — always fully visible, no elastic pop
                     scaled_card = active_card_image.resize((840, 890), Image.Resampling.BILINEAR)
@@ -4240,13 +4352,7 @@ class VideoEngine:
                 if active_block:
                     self._render_srt_subtitle_block(draw, bumper_font, active_block["text"], y_pos=1310)
 
-        # Draw episode badge on starting bumper
-            if episode_num is not None:
-                try:
-                    small_font = ImageFont.truetype(self.font_path, 28)
-                    draw.text((40, 1850), f"EP. {episode_num:03d}", fill=(255, 255, 255, 80), font=small_font)
-                except Exception:
-                    pass
+        # Draw episode badge on starting bumper — REMOVED (users swipe away)
                     
             fused_arr = np.array(fused_img)
             return fused_arr
@@ -4502,7 +4608,11 @@ class VideoEngine:
 
         try:
             # Load N+2 audio tracks [starting, s1..sN, ending]
-            audio_clips = [AudioFileClip(p) for p in audio_paths]
+            audio_clips = []
+            for i, p in enumerate(audio_paths):
+                if not os.path.exists(p):
+                    print(f"[VideoEngine] CRITICAL: Audio file missing: {p}")
+                audio_clips.append(AudioFileClip(p))
             audio_durations = [c.duration for c in audio_clips]
             dur_str = ", ".join([f"s{i+1 if i>0 and i<len(audio_durations)-1 else ('starting' if i==0 else 'ending')}={audio_durations[i]:.2f}s" for i in range(len(audio_durations))])
             print(f"[VideoEngine] Audio durations: {dur_str}")
@@ -4929,7 +5039,11 @@ class VideoEngine:
         
         try:
             # Load audio tracks
-            audio_clips = [AudioFileClip(p) for p in audio_paths]
+            audio_clips = []
+            for i, p in enumerate(audio_paths):
+                if not os.path.exists(p):
+                    print(f"[VideoEngine] CRITICAL: Audio file missing: {p}")
+                audio_clips.append(AudioFileClip(p))
             
             n = len(scene_texts)
             
@@ -5010,6 +5124,12 @@ class VideoEngine:
                 label_letter = chr(65 + i)  # A, B, C, D, E...
                 label = f"EXHIBIT {label_letter}"
                 status = "STATUS: VERIFIED FACT" if is_truth else "STATUS: DEBUNKED MYTH"
+                # Assign scene text as caption: cards 0-1→scene0, 2-3→scene1, 4-5→scene2
+                scene_for_card = min(i * len(scene_texts) // len(image_paths), len(scene_texts) - 1) if image_paths and scene_texts else 0
+                card_caption = scene_texts[scene_for_card] if scene_for_card < len(scene_texts) else ""
+                # Redact key words from caption to build mystery (skip last scene — truth reveal)
+                if scene_for_card < len(scene_texts) - 1 and card_caption:
+                    card_caption = self._redact_text(card_caption, redact_ratio=0.4)
                 card = self._generate_card(
                     image_path=img_path,
                     label_text=label,
@@ -5017,7 +5137,8 @@ class VideoEngine:
                     is_truth=is_truth,
                     style_dict=st,
                     topic=topic or "",
-                    add_redactions=(i == 0)
+                    add_redactions=(i == 0),
+                    card_text=card_caption
                 )
                 all_cards.append(card)
             
@@ -5032,6 +5153,8 @@ class VideoEngine:
                 if not cards_per_scene[si] and all_cards:
                     if all_cards[-1] is not None:
                         cards_per_scene[si].append(all_cards[-1])
+            
+            print(f"[VideoEngine] Cards per scene: {[len(c) for c in cards_per_scene]}, all_cards total: {len(all_cards)}, st keys: {list(st.keys())[:5]}...")
             
             # Calculate scene timelines
             scene_timelines = []
@@ -5109,7 +5232,8 @@ class VideoEngine:
                         from moviepy.editor import CompositeVideoClip
                     except ImportError:
                         from moviepy import CompositeVideoClip
-                    tint = self._create_color_tint((1080, 1920), content_durations[i], warm=False)
+                    # Fade in the cold blue tint over 1.5s for dramatic truth reveal
+                    tint = self._create_color_tint_animated((1080, 1920), content_durations[i], warm=False, fade_duration=1.5)
                     scene_clip = CompositeVideoClip([scene_clip, tint])
                 
                 content_video_clips.append(scene_clip)
@@ -5704,10 +5828,8 @@ class VideoEngine:
         except Exception:
             sfont = sfont_s = ImageFont.load_default()
         sd = ImageDraw.Draw(start_canvas)
-        start_label = f"EP.{episode_num}" if episode_num else ""
-        sd.text((540, 1600), f"CLASSIFIED FILE #{start_label}", fill=(255, 60, 60), font=sfont, anchor="mt")
         if starting_text:
-            sd.text((540, 1700), f"\"{starting_text}\"", fill=(255, 255, 255), font=sfont, anchor="mt")
+            sd.text((540, 1600), f"\"{starting_text}\"", fill=(255, 60, 60), font=sfont, anchor="mt")
         start_canvas.save(start_path)
 
         # Create ending bumper image
